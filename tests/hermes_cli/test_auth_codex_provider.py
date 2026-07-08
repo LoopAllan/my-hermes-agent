@@ -84,6 +84,31 @@ def test_resolve_codex_runtime_credentials_missing_access_token(tmp_path, monkey
     assert exc.value.relogin_required is True
 
 
+def test_resolve_codex_runtime_credentials_imports_shared_codex_home_when_store_missing(tmp_path, monkeypatch):
+    """A profile-local /opt/data can bootstrap from shared CODEX_HOME auth."""
+    hermes_home = tmp_path / "profile-hermes"
+    hermes_home.mkdir(parents=True)
+    (hermes_home / "auth.json").write_text(json.dumps({"version": 1, "providers": {}}))
+    codex_home = tmp_path / "shared-codex"
+    codex_home.mkdir()
+    access = _jwt_with_exp(int(time.time()) + 3600)
+    (codex_home / "auth.json").write_text(json.dumps({
+        "tokens": {
+            "access_token": access,
+            "refresh_token": "shared-refresh",
+        }
+    }))
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    resolved = resolve_codex_runtime_credentials(refresh_if_expiring=False)
+
+    assert resolved["api_key"] == access
+    assert resolved["source"] == "hermes-auth-store"
+    stored = json.loads((hermes_home / "auth.json").read_text())
+    assert stored["providers"]["openai-codex"]["tokens"]["refresh_token"] == "shared-refresh"
+
+
 def test_resolve_codex_runtime_credentials_refreshes_expiring_token(tmp_path, monkeypatch):
     hermes_home = tmp_path / "hermes"
     expiring_token = _jwt_with_exp(int(time.time()) - 10)

@@ -4,8 +4,13 @@
 # Usage:
 #   HERMES_UID=$(id -u) HERMES_GID=$(id -g) docker compose up -d
 #
-# Set HERMES_UID / HERMES_GID to the host user that owns ~/.hermes so
-# files created inside the container stay readable/writable on the host.
+# Set HERMES_PROFILE_DATA to the host directory for this deployment's
+# per-profile Hermes home (defaults to ~/.hermes). Set HERMES_SHARED_CODEX_DIR
+# to a shared Codex CLI auth directory (defaults to ~/.codex) when several
+# deployments should reuse one ChatGPT/Codex login.
+#
+# Set HERMES_UID / HERMES_GID to the host user that owns the mounted profile
+# directory so files created inside the container stay readable/writable on the host.
 # The s6-overlay stage2 hook remaps the internal `hermes` user to these
 # values via usermod/groupmod; each supervised service then drops to that
 # user via `s6-setuidgid`.
@@ -34,10 +39,12 @@ services:
     restart: unless-stopped
     network_mode: host
     volumes:
-      - ~/.hermes:/opt/data
+      - ${HERMES_PROFILE_DATA:-~/.hermes}:/opt/data
+      - ${HERMES_SHARED_CODEX_DIR:-~/.codex}:/etc/data/codex
     environment:
       - HERMES_UID=${HERMES_UID:-10000}
       - HERMES_GID=${HERMES_GID:-10000}
+      - CODEX_HOME=/etc/data/codex
       # To expose the OpenAI-compatible API server beyond localhost,
       # uncomment BOTH lines (API_SERVER_KEY is mandatory for auth):
       # - API_SERVER_HOST=0.0.0.0
@@ -68,9 +75,11 @@ services:
     depends_on:
       - gateway
     volumes:
-      - ~/.hermes:/opt/data
+      - ${HERMES_PROFILE_DATA:-~/.hermes}:/opt/data
+      - ${HERMES_SHARED_CODEX_DIR:-~/.codex}:/etc/data/codex
     environment:
       - HERMES_UID=${HERMES_UID:-10000}
       - HERMES_GID=${HERMES_GID:-10000}
+      - CODEX_HOME=/etc/data/codex
     # Localhost-only. For remote access, tunnel via `ssh -L 9119:localhost:9119`.
     command: ["dashboard", "--host", "127.0.0.1", "--no-open"]
