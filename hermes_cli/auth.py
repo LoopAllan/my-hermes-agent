@@ -3902,6 +3902,7 @@ def resolve_codex_runtime_credentials(
     except AuthError as exc:
         read_error = exc
         if getattr(exc, "relogin_required", False) and getattr(exc, "code", None) in {
+            "codex_auth_missing",
             "codex_auth_missing_access_token",
             "codex_auth_missing_refresh_token",
             "codex_auth_invalid_shape",
