@@ -57,15 +57,22 @@ echo "Owner: $OWNER, Repo: $REPO"
 
 ## 1. Branch Creation
 
-This part is pure `git` — identical either way:
+This part is pure `git` — identical either way. Always reset an existing work
+branch to the repository default branch before making changes and opening a PR.
+This prevents a reused branch from carrying old commits into a new PR.
 
 ```bash
-# Make sure you're up to date
-git fetch origin
-git checkout main && git pull origin main
+# Resolve the default branch. Fall back to main if origin/HEAD is unavailable.
+DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+DEFAULT_BRANCH=${DEFAULT_BRANCH:-main}
+BRANCH=feat/add-user-authentication
 
-# Create and switch to a new branch
-git checkout -b feat/add-user-authentication
+# Start from the latest default branch.
+git fetch origin "$DEFAULT_BRANCH"
+
+# Create the branch, or reset the existing local branch to origin/$DEFAULT_BRANCH.
+git checkout -B "$BRANCH" "origin/$DEFAULT_BRANCH"
+git reset --hard "origin/$DEFAULT_BRANCH"
 ```
 
 Branch naming conventions:
@@ -106,7 +113,7 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `ci`, `chore`, `perf`
 ### Push the Branch (same either way)
 
 ```bash
-git push -u origin HEAD
+git push --force-with-lease -u origin HEAD
 ```
 
 ### Create the PR
