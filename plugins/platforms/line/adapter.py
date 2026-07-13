@@ -422,20 +422,32 @@ def _allowed_for_source(
     group_ids: Set[str],
     room_ids: Set[str],
 ) -> bool:
-    """Three-list gate — credit PR #18153."""
+    """Allow only configured sources and, outside DMs, configured senders."""
     if allow_all:
         return True
     src_type = (source or {}).get("type", "")
+    uid = source.get("userId", "")
     if src_type == "user":
-        uid = source.get("userId", "")
         return bool(uid) and uid in user_ids
     if src_type == "group":
         gid = source.get("groupId", "")
-        return bool(gid) and gid in group_ids
+        return bool(gid) and gid in group_ids and bool(uid) and uid in user_ids
     if src_type == "room":
         rid = source.get("roomId", "")
-        return bool(rid) and rid in room_ids
+        return bool(rid) and rid in room_ids and bool(uid) and uid in user_ids
     return False
+
+
+def _message_mentions_user(message: Dict[str, Any], user_id: Optional[str]) -> bool:
+    """Return whether a LINE text-message mention targets ``user_id``."""
+    if not user_id:
+        return False
+    mention = (message or {}).get("mention") or {}
+    mentionees = mention.get("mentionees") or []
+    return any(
+        isinstance(mentionee, dict) and mentionee.get("userId") == user_id
+        for mentionee in mentionees
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -688,6 +700,9 @@ class LineAdapter(BasePlatformAdapter):
         self.allowed_rooms = _csv_set(
             os.getenv("LINE_ALLOWED_ROOMS", "")
         ) | set(extra.get("allowed_rooms", []))
+        self.require_mention = _truthy_env(
+            "LINE_REQUIRE_MENTION", bool(extra.get("require_mention", False))
+        )
 
         # Slow-LLM postback button threshold
         try:
@@ -918,6 +933,15 @@ class LineAdapter(BasePlatformAdapter):
             room_ids=self.allowed_rooms,
         ):
             logger.info("LINE: rejecting unauthorized source %s", source)
+            return
+
+        if (
+            event_type == "message"
+            and self.require_mention
+            and source.get("type") in {"group", "room"}
+            and not _message_mentions_user(event.get("message") or {}, self._bot_user_id)
+        ):
+            logger.debug("LINE: ignoring group/room message without bot mention")
             return
 
         if event_type == "message":

@@ -556,9 +556,10 @@ Used by the bundled LINE platform plugin (`plugins/platforms/line/`). See [Messa
 | `LINE_HOST` | Webhook bind host (default: `0.0.0.0`). |
 | `LINE_PORT` | Webhook bind port (default: `8646`). |
 | `LINE_PUBLIC_URL` | Public HTTPS base URL (e.g. `https://my-tunnel.example.com`). Required for image / audio / video sends — LINE only accepts HTTPS-reachable URLs. |
-| `LINE_ALLOWED_USERS` | Comma-separated user IDs allowed to DM the bot (`U`-prefixed). |
-| `LINE_ALLOWED_GROUPS` | Comma-separated group IDs the bot will respond in (`C`-prefixed). |
-| `LINE_ALLOWED_ROOMS` | Comma-separated room IDs the bot will respond in (`R`-prefixed). |
+| `LINE_ALLOWED_USERS` | Comma-separated user IDs allowed to DM the bot and send in an allowed group or room (`U`-prefixed). |
+| `LINE_ALLOWED_GROUPS` | Comma-separated group IDs the bot will respond in (`C`-prefixed); each sender must also be in `LINE_ALLOWED_USERS`. |
+| `LINE_ALLOWED_ROOMS` | Comma-separated room IDs the bot will respond in (`R`-prefixed); each sender must also be in `LINE_ALLOWED_USERS`. |
+| `LINE_REQUIRE_MENTION` | Require an explicit bot @mention for group and room messages; DMs are unaffected. Default: `false`. |
 | `LINE_ALLOW_ALL_USERS` | Dev-only escape hatch — accepts any source. Default: `false`. |
 | `LINE_HOME_CHANNEL` | Default delivery target for cron jobs with `deliver: line`. |
 | `LINE_SLOW_RESPONSE_THRESHOLD` | Seconds before the slow-LLM Template Buttons postback fires (default: `45`). Set `0` to disable and always Push-fallback. |
