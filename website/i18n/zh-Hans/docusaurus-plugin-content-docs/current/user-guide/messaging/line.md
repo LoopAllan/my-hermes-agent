@@ -14,9 +14,9 @@ LINE 是日本、台湾和泰国的主流即时通讯应用。如果你的用户
 
 | 场景 | 行为 |
 |---------|----------|
-| **1:1 聊天**（`U` 开头 ID） | 响应每条消息 |
-| **群聊**（`C` 开头 ID） | 仅当群组在白名单中时响应 |
-| **多人房间**（`R` 开头 ID） | 仅当房间在白名单中时响应 |
+| **1:1 聊天**（`U` 开头 ID） | 仅当发送者在 `allowed_users` 中时响应 |
+| **群聊**（`C` 开头 ID） | 仅当群组和发送者均在白名单中时响应；可选要求 @提及 |
+| **多人房间**（`R` 开头 ID） | 仅当房间和发送者均在白名单中时响应；可选要求 @提及 |
 
 入站的文本、图片、音频、视频、文件、贴纸和位置信息均可处理。出站文本优先使用**免费 reply token**（单次使用，有效期约 60 秒），token 过期后回退至计费的 Push API。
 
@@ -55,30 +55,46 @@ devtunnel host hermes-line
 
 ## 第三步：配置 Hermes
 
-在 `~/.hermes/.env` 中添加：
+在 `~/.hermes/.env` 中添加凭据：
 
 ```env
 LINE_CHANNEL_ACCESS_TOKEN=YOUR_LONG_LIVED_TOKEN
 LINE_CHANNEL_SECRET=YOUR_CHANNEL_SECRET
-
-# 白名单 — 至少填写其中一项（开发环境可使用 LINE_ALLOW_ALL_USERS=true）
-LINE_ALLOWED_USERS=U1234567890abcdef...           # 逗号分隔的 U 开头 ID
-LINE_ALLOWED_GROUPS=C1234567890abcdef...          # 可选的群组 ID
-LINE_ALLOWED_ROOMS=R1234567890abcdef...           # 可选的房间 ID
 
 # 发送图片 / 音频 / 视频时必填 — 隧道解析到的公网 HTTPS 基础 URL
 # 未设置时，send_image/voice/video 将拒绝执行
 LINE_PUBLIC_URL=https://my-tunnel.example.com
 ```
 
-然后在 `~/.hermes/config.yaml` 中：
+然后在 `~/.hermes/config.yaml` 中配置访问控制：
 
 ```yaml
 gateway:
   platforms:
     line:
       enabled: true
+      # `allowed_users` 支持多个 LINE 用户 ID；私聊、群组和房间的发送者均须在此列表中。
+      allowed_users:
+        - U1234567890abcdef...
+        - Uabcdef1234567890...
+      allowed_groups:
+        - C1234567890abcdef...
+      allowed_rooms:
+        - R1234567890abcdef...
+      # 仅作用于群组和房间；白名单私聊用户不受影响。
+      require_mention: true
 ```
+
+为兼容环境变量配置，可使用逗号分隔列表并设置 `LINE_REQUIRE_MENTION=true`：
+
+```env
+LINE_ALLOWED_USERS=U1234567890abcdef...,Uabcdef1234567890...
+LINE_ALLOWED_GROUPS=C1234567890abcdef...
+LINE_ALLOWED_ROOMS=R1234567890abcdef...
+LINE_REQUIRE_MENTION=true
+```
+
+`require_mention` 使用 LINE 的结构化提及元数据，不会以显示名称进行文字匹配。启用后，已授权群组或房间中的消息必须明确 @提及机器人，才会被处理。两者同时设置时，对应的 `LINE_*` 环境变量会覆盖 `config.yaml` 值。
 
 这就够了 — `gateway/config.py` 中的捆绑插件扫描会自动识别 `plugins/platforms/line/`。无需编辑 `Platform.LINE` 枚举，无需注册 `_create_adapter`。
 
@@ -163,9 +179,10 @@ LINE_HOME_CHANNEL=Uxxxxxxxxxxxxxxxxxxxx     # 默认推送目标
 | `LINE_HOST` | 否 | `0.0.0.0` | Webhook 绑定主机 |
 | `LINE_PORT` | 否 | `8646` | Webhook 绑定端口 |
 | `LINE_PUBLIC_URL` | 媒体发送时必填 | — | 公网 HTTPS 基础 URL；发送图片/音频/视频时必须设置 |
-| `LINE_ALLOWED_USERS` | 三选一 | — | 逗号分隔的用户 ID（U 开头） |
-| `LINE_ALLOWED_GROUPS` | 三选一 | — | 逗号分隔的群组 ID（C 开头） |
-| `LINE_ALLOWED_ROOMS` | 三选一 | — | 逗号分隔的房间 ID（R 开头） |
+| `LINE_ALLOWED_USERS` | 必填（非开发模式） | — | 逗号分隔的用户 ID（U 开头）；私聊、群组和房间的发送者均须在此列表中 |
+| `LINE_ALLOWED_GROUPS` | 群聊时必填 | — | 逗号分隔的群组 ID（C 开头） |
+| `LINE_ALLOWED_ROOMS` | 房间时必填 | — | 逗号分隔的房间 ID（R 开头） |
+| `LINE_REQUIRE_MENTION` | 否 | `false` | 群组和房间消息必须明确 @提及机器人；私聊不受影响 |
 | `LINE_ALLOW_ALL_USERS` | 仅开发环境 | `false` | 完全跳过白名单验证 |
 | `LINE_HOME_CHANNEL` | 否 | — | 默认 cron / 通知推送目标 |
 | `LINE_SLOW_RESPONSE_THRESHOLD` | 否 | `45` | 触发 postback 按钮的等待秒数（`0` = 禁用） |
