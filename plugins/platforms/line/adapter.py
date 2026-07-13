@@ -422,12 +422,12 @@ def _allowed_for_source(
     group_ids: Set[str],
     room_ids: Set[str],
 ) -> bool:
-    """Allow only configured sources; groups and rooms use their own allowlists."""
+    """Three-list gate — credit PR #18153."""
     if allow_all:
         return True
     src_type = (source or {}).get("type", "")
-    uid = source.get("userId", "")
     if src_type == "user":
+        uid = source.get("userId", "")
         return bool(uid) and uid in user_ids
     if src_type == "group":
         gid = source.get("groupId", "")
