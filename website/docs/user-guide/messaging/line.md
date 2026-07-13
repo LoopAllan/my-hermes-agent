@@ -17,8 +17,8 @@ LINE is the dominant messaging app in Japan, Taiwan, and Thailand. If your users
 | Context | Behavior |
 |---------|----------|
 | **1:1 chat** (`U` IDs) | Responds when the sender is on `allowed_users` |
-| **Group chat** (`C` IDs) | Responds only when both the group and sender are allowlisted; optionally requires an @mention |
-| **Multi-user room** (`R` IDs) | Responds only when both the room and sender are allowlisted; optionally requires an @mention |
+| **Group chat** (`C` IDs) | Responds when the group is allowlisted; optionally requires an @mention |
+| **Multi-user room** (`R` IDs) | Responds when the room is allowlisted; optionally requires an @mention |
 
 Inbound text, images, audio, video, files, stickers, and locations are all handled. Outbound text uses the **free reply token first** (single-use, ~60s window) and falls back to the metered Push API when the token has expired.
 
@@ -75,8 +75,7 @@ gateway:
   platforms:
     line:
       enabled: true
-      # `allowed_users` accepts multiple LINE user IDs. A sender must be in
-      # this list for DMs, groups, and rooms.
+      # `allowed_users` accepts multiple LINE user IDs for DMs.
       allowed_users:
         - U1234567890abcdef...
         - Uabcdef1234567890...
@@ -186,7 +185,7 @@ Cron jobs with `deliver: line` route to `LINE_HOME_CHANNEL`. The adapter ships a
 | `LINE_HOST` | no | `0.0.0.0` | Webhook bind host |
 | `LINE_PORT` | no | `8646` | Webhook bind port |
 | `LINE_PUBLIC_URL` | for media | — | Public HTTPS base URL; required for image/voice/video sends |
-| `LINE_ALLOWED_USERS` | one of | — | Comma-separated user IDs (U-prefixed); required for every non-dev source, including group and room senders |
+| `LINE_ALLOWED_USERS` | one of | — | Comma-separated user IDs (U-prefixed) for DMs |
 | `LINE_ALLOWED_GROUPS` | groups | — | Comma-separated group IDs (C-prefixed) |
 | `LINE_ALLOWED_ROOMS` | rooms | — | Comma-separated room IDs (R-prefixed) |
 | `LINE_REQUIRE_MENTION` | no | `false` | Require an explicit bot @mention for group and room messages; DMs are unaffected |
@@ -204,7 +203,7 @@ Cron jobs with `deliver: line` route to `LINE_HOME_CHANNEL`. The adapter ships a
 
 **"invalid signature" on webhook verify.** The `Channel secret` was copied wrong, or your tunnel rewrote the request body. Verify with `curl -i https://<tunnel>/line/webhook/health` first — that should return `{"status":"ok","platform":"line"}`.
 
-**Bot receives nothing in groups or rooms.** Check that the conversation ID is in `LINE_ALLOWED_GROUPS` (`C...`) or `LINE_ALLOWED_ROOMS` (`R...`) **and** the sender's `U...` ID is in `LINE_ALLOWED_USERS`. If `LINE_REQUIRE_MENTION=true` (or `require_mention: true`) is enabled, the message must also explicitly @mention the bot. To find IDs, send a test message and grep `~/.hermes/logs/gateway.log` for `LINE: rejecting unauthorized source` — the rejected source dict has the IDs.
+**Bot receives nothing in groups or rooms.** Check that the conversation ID is in `LINE_ALLOWED_GROUPS` (`C...`) or `LINE_ALLOWED_ROOMS` (`R...`). If `LINE_REQUIRE_MENTION=true` (or `require_mention: true`) is enabled, the message must also explicitly @mention the bot. To find IDs, send a test message and grep `~/.hermes/logs/gateway.log` for `LINE: rejecting unauthorized source` — the rejected source dict has the IDs.
 
 **`send_image` fails with "LINE_PUBLIC_URL must be set".** LINE's Messaging API does not accept binary uploads — images, audio, and video must be reachable HTTPS URLs. Set `LINE_PUBLIC_URL` to the tunnel's public hostname and the adapter will serve files from `/line/media/<token>/<filename>` automatically.
 

@@ -15,8 +15,8 @@ LINE 是日本、台湾和泰国的主流即时通讯应用。如果你的用户
 | 场景 | 行为 |
 |---------|----------|
 | **1:1 聊天**（`U` 开头 ID） | 仅当发送者在 `allowed_users` 中时响应 |
-| **群聊**（`C` 开头 ID） | 仅当群组和发送者均在白名单中时响应；可选要求 @提及 |
-| **多人房间**（`R` 开头 ID） | 仅当房间和发送者均在白名单中时响应；可选要求 @提及 |
+| **群聊**（`C` 开头 ID） | 仅当群组在白名单中时响应；可选要求 @提及 |
+| **多人房间**（`R` 开头 ID） | 仅当房间在白名单中时响应；可选要求 @提及 |
 
 入站的文本、图片、音频、视频、文件、贴纸和位置信息均可处理。出站文本优先使用**免费 reply token**（单次使用，有效期约 60 秒），token 过期后回退至计费的 Push API。
 
@@ -73,7 +73,7 @@ gateway:
   platforms:
     line:
       enabled: true
-      # `allowed_users` 支持多个 LINE 用户 ID；私聊、群组和房间的发送者均须在此列表中。
+      # `allowed_users` 支持多个 LINE 用户 ID，用于私聊。
       allowed_users:
         - U1234567890abcdef...
         - Uabcdef1234567890...
@@ -179,7 +179,7 @@ LINE_HOME_CHANNEL=Uxxxxxxxxxxxxxxxxxxxx     # 默认推送目标
 | `LINE_HOST` | 否 | `0.0.0.0` | Webhook 绑定主机 |
 | `LINE_PORT` | 否 | `8646` | Webhook 绑定端口 |
 | `LINE_PUBLIC_URL` | 媒体发送时必填 | — | 公网 HTTPS 基础 URL；发送图片/音频/视频时必须设置 |
-| `LINE_ALLOWED_USERS` | 必填（非开发模式） | — | 逗号分隔的用户 ID（U 开头）；私聊、群组和房间的发送者均须在此列表中 |
+| `LINE_ALLOWED_USERS` | 私聊时必填 | — | 逗号分隔的用户 ID（U 开头） |
 | `LINE_ALLOWED_GROUPS` | 群聊时必填 | — | 逗号分隔的群组 ID（C 开头） |
 | `LINE_ALLOWED_ROOMS` | 房间时必填 | — | 逗号分隔的房间 ID（R 开头） |
 | `LINE_REQUIRE_MENTION` | 否 | `false` | 群组和房间消息必须明确 @提及机器人；私聊不受影响 |
@@ -197,7 +197,7 @@ LINE_HOME_CHANNEL=Uxxxxxxxxxxxxxxxxxxxx     # 默认推送目标
 
 **webhook 验证时提示"invalid signature"。** `Channel secret` 复制有误，或隧道重写了请求体。请先用 `curl -i https://<tunnel>/line/webhook/health` 验证 — 应返回 `{"status":"ok","platform":"line"}`。
 
-**机器人在群组中收不到消息。** 检查 `LINE_ALLOWED_GROUPS` 是否包含对应的 `C...` 群组 ID。如需查找群组 ID，发送一条测试消息后在 `~/.hermes/logs/gateway.log` 中搜索 `LINE: rejecting unauthorized source` — 被拒绝的 source 字典中包含相关 ID。
+**机器人在群组或房间中收不到消息。** 检查会话 ID 是否在 `LINE_ALLOWED_GROUPS`（`C...`）或 `LINE_ALLOWED_ROOMS`（`R...`）中。若已启用 `LINE_REQUIRE_MENTION=true`（或 `require_mention: true`），消息还必须明确 @提及机器人。要查找 ID，请发送测试消息后在 `~/.hermes/logs/gateway.log` 中搜索 `LINE: rejecting unauthorized source` — 被拒绝的 source 字典中包含相关 ID。
 
 **`send_image` 报错"LINE_PUBLIC_URL must be set"。** LINE Messaging API 不接受二进制上传 — 图片、音频和视频必须是可访问的 HTTPS URL。将 `LINE_PUBLIC_URL` 设置为隧道的公网主机名，适配器会自动从 `/line/media/<token>/<filename>` 提供文件服务。
 

@@ -422,7 +422,7 @@ def _allowed_for_source(
     group_ids: Set[str],
     room_ids: Set[str],
 ) -> bool:
-    """Allow only configured sources and, outside DMs, configured senders."""
+    """Allow only configured sources; groups and rooms use their own allowlists."""
     if allow_all:
         return True
     src_type = (source or {}).get("type", "")
@@ -431,10 +431,10 @@ def _allowed_for_source(
         return bool(uid) and uid in user_ids
     if src_type == "group":
         gid = source.get("groupId", "")
-        return bool(gid) and gid in group_ids and bool(uid) and uid in user_ids
+        return bool(gid) and gid in group_ids
     if src_type == "room":
         rid = source.get("roomId", "")
-        return bool(rid) and rid in room_ids and bool(uid) and uid in user_ids
+        return bool(rid) and rid in room_ids
     return False
 
 

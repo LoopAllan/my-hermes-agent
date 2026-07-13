@@ -136,17 +136,15 @@ class TestAllowlist:
         src = {"type": "user", "userId": "Uother"}
         assert not _allowed_for_source(src, allow_all=False, user_ids={"Uok"}, group_ids=set(), room_ids=set())
 
-    def test_group_requires_group_and_sender_to_be_allowlisted(self):
-        src = {"type": "group", "groupId": "Cok", "userId": "Uok"}
-        assert _allowed_for_source(src, allow_all=False, user_ids={"Uok"}, group_ids={"Cok"}, room_ids=set())
-        assert not _allowed_for_source(src, allow_all=False, user_ids={"Uother"}, group_ids={"Cok"}, room_ids=set())
-        assert not _allowed_for_source(src, allow_all=False, user_ids={"Uok"}, group_ids=set(), room_ids=set())
+    def test_group_requires_only_the_group_allowlist(self):
+        src = {"type": "group", "groupId": "Cok", "userId": "Uany"}
+        assert _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids={"Cok"}, room_ids=set())
+        assert not _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids=set(), room_ids=set())
 
-    def test_room_requires_room_and_sender_to_be_allowlisted(self):
-        src = {"type": "room", "roomId": "Rok", "userId": "Uok"}
-        assert _allowed_for_source(src, allow_all=False, user_ids={"Uok"}, group_ids=set(), room_ids={"Rok"})
-        assert not _allowed_for_source(src, allow_all=False, user_ids={"Uother"}, group_ids=set(), room_ids={"Rok"})
-        assert not _allowed_for_source(src, allow_all=False, user_ids={"Uok"}, group_ids=set(), room_ids=set())
+    def test_room_requires_only_the_room_allowlist(self):
+        src = {"type": "room", "roomId": "Rok", "userId": "Uany"}
+        assert _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids=set(), room_ids={"Rok"})
+        assert not _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids=set(), room_ids=set())
 
     def test_unknown_type_rejected(self):
         src = {"type": "weird"}
