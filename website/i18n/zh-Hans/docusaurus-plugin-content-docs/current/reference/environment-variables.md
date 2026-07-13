@@ -468,9 +468,9 @@ Graph 事件（Teams 会议、日历、聊天等）的入站变更通知监听�
 | `LINE_HOST` | webhook 绑定主机（默认：`0.0.0.0`）。 |
 | `LINE_PORT` | webhook 绑定端口（默认：`8646`）。 |
 | `LINE_PUBLIC_URL` | 公共 HTTPS base URL（例如 `https://my-tunnel.example.com`）。发送图片/音频/视频时必填——LINE 仅接受 HTTPS 可访问的 URL。 |
-| `LINE_ALLOWED_USERS` | 允许私信 bot 及在已授权群组/房间中发送消息的逗号分隔用户 ID（`U` 前缀）。 |
-| `LINE_ALLOWED_GROUPS` | bot 将在其中响应的逗号分隔群组 ID（`C` 前缀）；发送者还必须在 `LINE_ALLOWED_USERS` 中。 |
-| `LINE_ALLOWED_ROOMS` | bot 将在其中响应的逗号分隔房间 ID（`R` 前缀）；发送者还必须在 `LINE_ALLOWED_USERS` 中。 |
+| `LINE_ALLOWED_USERS` | 允许私信 bot 的逗号分隔用户 ID（`U` 前缀）。 |
+| `LINE_ALLOWED_GROUPS` | bot 将在其中响应的逗号分隔群组 ID（`C` 前缀）。 |
+| `LINE_ALLOWED_ROOMS` | bot 将在其中响应的逗号分隔房间 ID（`R` 前缀）。 |
 | `LINE_REQUIRE_MENTION` | 群组和房间消息必须明确 @提及机器人；私信不受影响。默认：`false`。 |
 | `LINE_ALLOW_ALL_USERS` | 仅用于开发的逃生舱——接受任意来源。默认：`false`。 |
 | `LINE_HOME_CHANNEL` | `deliver: line` 的 cron 任务的默认投递目标。 |

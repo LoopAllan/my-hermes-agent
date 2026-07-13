@@ -40,7 +40,7 @@ optional_env:
     prompt: "Public HTTPS base URL"
     password: false
   - name: LINE_ALLOWED_USERS
-    description: "Comma-separated LINE user IDs allowed to DM the bot and send in allowed groups/rooms (U-prefixed)"
+    description: "Comma-separated LINE user IDs allowed to DM the bot (U-prefixed)"
     prompt: "Allowed user IDs (comma-separated)"
     password: false
   - name: LINE_REQUIRE_MENTION
