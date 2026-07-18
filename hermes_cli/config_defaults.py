@@ -1661,21 +1661,19 @@ DEFAULT_CONFIG = {
         "turn_isolation": False,
         "compute_host_heartbeat_secs": 15,
         "compute_host_respawn_max": 3,
-        # Hide the token/cost analytics surfaces (Analytics page, token bars and
-        # cost figures on the Models page) by default.  The numbers shown there
+        # Show the token/cost analytics surfaces (Analytics page, token bars and
+        # cost figures on the Models page) by default. The numbers shown there
         # are a local debug estimate: they only count successful main-agent
         # responses with a usable ``response.usage``, and silently exclude every
         # auxiliary call (context compression, title generation, vision,
         # session search, web extract, smart approval, MCP routing, plugin LLM
         # access) plus provider-side retries, fallback attempts, and any call
-        # whose usage block didn't come back.  Cache writes are also missing
-        # from the API response.  On models with heavy auxiliary traffic
-        # (Kimi K2.6, MiniMax M2.7) the local total can be 10x-100x lower than
-        # the provider bill, which is worse than hiding the numbers entirely
-        # because they look precise enough to compare against the provider.
-        # Set this to True to re-enable the surfaces with the understanding
-        # that the numbers are a local lower-bound estimate, not billing.
-        "show_token_analytics": False,
+        # whose usage block didn't come back. Cache writes are also missing from
+        # the API response. On models with heavy auxiliary traffic (Kimi K2.6,
+        # MiniMax M2.7) the local total can be 10x-100x lower than the provider
+        # bill. It is a local lower-bound estimate, not a billing source; set
+        # this to False to hide these surfaces.
+        "show_token_analytics": True,
         # IP addresses or bounded CIDR networks of reverse proxies allowed to
         # supply X-Forwarded-Proto / X-Forwarded-For. Loopback remains trusted
         # automatically. Wildcards and /0 networks are rejected so arbitrary

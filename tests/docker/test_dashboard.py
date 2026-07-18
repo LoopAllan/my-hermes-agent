@@ -18,18 +18,39 @@ import time
 from tests.docker.conftest import docker_exec, docker_exec_sh, start_container, poll_container
 
 
-def test_dashboard_not_running_by_default(
+def test_dashboard_runs_by_default(
     built_image: str, container_name: str,
 ) -> None:
-    """Without HERMES_DASHBOARD, no dashboard process should be running."""
-    start_container(built_image, container_name, cmd="sleep 60")
-    r = docker_exec(container_name, "pgrep", "-f", "hermes dashboard")
-    # pgrep exits non-zero when no match found
-    assert r.returncode != 0, (
-        "Dashboard should not be running without HERMES_DASHBOARD"
+    """The container starts its supervised dashboard unless explicitly disabled."""
+    start_container(
+        built_image, container_name,
+        "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=admin",
+        "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=test-dashboard-pw",
+        cmd="sleep 60",
     )
+    ok, _ = poll_container(
+        container_name, "pgrep -f 'hermes dashboard'", deadline_s=30.0,
+    )
+    assert ok, "Dashboard should be running by default"
 
 
+def test_dashboard_slot_reports_down_when_explicitly_disabled(
+    built_image: str, container_name: str,
+) -> None:
+    """HERMES_DASHBOARD=false opts out of the default dashboard service."""
+    start_container(
+        built_image, container_name, "HERMES_DASHBOARD=false", cmd="sleep 60",
+    )
+    # /command/ isn't on PATH for docker-exec sessions, so call by
+    # absolute path.
+    r = docker_exec(
+        container_name, "/command/s6-svstat", "/run/service/dashboard",
+    )
+    assert r.returncode == 0, f"s6-svstat failed: {r.stderr!r} / {r.stdout!r}"
+    assert "down" in r.stdout, (
+        f"Dashboard slot should be 'down' without HERMES_DASHBOARD; "
+        f"svstat reports: {r.stdout!r}"
+    )
 
 
 
