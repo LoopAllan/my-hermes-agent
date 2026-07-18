@@ -22,10 +22,16 @@ def test_dashboard_runs_by_default(
 ) -> None:
     """The container starts its supervised dashboard unless explicitly disabled."""
     start_container(built_image, container_name, cmd="sleep 60")
-    ok, _ = poll_container(
-        container_name, "pgrep -f 'hermes dashboard'", deadline_s=30.0,
+    # A transient subprocess is insufficient: the regression this protects
+    # against launched Dashboard then immediately failed its auth/bind path.
+    # Require both a live loopback HTTP endpoint and an active s6 service slot.
+    ok, output = poll_container(
+        container_name,
+        "curl -fsS -m 2 http://127.0.0.1:9119/api/status >/dev/null "
+        "&& /command/s6-svstat /run/service/dashboard | grep -q 'up '",
+        deadline_s=30.0,
     )
-    assert ok, "Dashboard should be running by default"
+    assert ok, f"Dashboard should be ready by default: {output}"
 
 
 def test_dashboard_slot_reports_down_when_explicitly_disabled(
