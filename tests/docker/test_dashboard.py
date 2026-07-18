@@ -21,12 +21,7 @@ def test_dashboard_runs_by_default(
     built_image: str, container_name: str,
 ) -> None:
     """The container starts its supervised dashboard unless explicitly disabled."""
-    start_container(
-        built_image, container_name,
-        "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=admin",
-        "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=test-dashboard-pw",
-        cmd="sleep 60",
-    )
+    start_container(built_image, container_name, cmd="sleep 60")
     ok, _ = poll_container(
         container_name, "pgrep -f 'hermes dashboard'", deadline_s=30.0,
     )
@@ -69,8 +64,10 @@ def test_dashboard_slot_reports_up_when_enabled(
         "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=test-dashboard-pw",
         cmd="sleep 120",
     )
-    # uvicorn takes a moment to bind; poll svstat.
-    poll_container(container_name, "/command/s6-svstat /run/service/dashboard | grep -q 'up '")
+    ok, output = poll_container(
+        container_name, "/command/s6-svstat /run/service/dashboard | grep -q 'up '",
+    )
+    assert ok, f"Dashboard slot should be up with HERMES_DASHBOARD=1: {output}"
 
 
 def test_dashboard_opt_in_starts(
