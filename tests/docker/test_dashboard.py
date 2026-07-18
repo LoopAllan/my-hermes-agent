@@ -1,10 +1,9 @@
-"""Harness: dashboard opt-in via HERMES_DASHBOARD.
+"""Docker integration coverage for the supervised Dashboard service.
 
-Today (tini): dashboard starts once when HERMES_DASHBOARD=1; if it crashes
-it stays dead. After Phase 2 (s6): dashboard starts once; if it crashes
-it is restarted under supervision. The restart-after-crash test lives in
-Phase 2 Task 2.5; this file only locks the opt-in surface (which must
-not change between tini and s6).
+The dashboard starts by default and can be disabled with
+``HERMES_DASHBOARD=false``. Explicitly setting ``HERMES_DASHBOARD=1`` remains
+supported. The restart-after-crash test lives elsewhere; this file locks the
+default-start and opt-out contract across the container lifecycle.
 
 Every ``docker exec`` here runs as the unprivileged ``hermes`` user
 (via :func:`docker_exec`/:func:`docker_exec_sh` in conftest), matching
@@ -48,7 +47,7 @@ def test_dashboard_slot_reports_down_when_explicitly_disabled(
     )
     assert r.returncode == 0, f"s6-svstat failed: {r.stderr!r} / {r.stdout!r}"
     assert "down" in r.stdout, (
-        f"Dashboard slot should be 'down' without HERMES_DASHBOARD; "
+        f"Dashboard slot should be 'down' with HERMES_DASHBOARD=false; "
         f"svstat reports: {r.stdout!r}"
     )
 
