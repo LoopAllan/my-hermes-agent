@@ -27,7 +27,11 @@ cd /opt/data
 # shellcheck disable=SC1091
 . /opt/hermes/.venv/bin/activate
 
-dash_host="${HERMES_DASHBOARD_HOST:-0.0.0.0}"
+# The Dashboard starts on loopback by default so a fresh container has a usable
+# local UI without exposing an unauthenticated control plane. To expose it to a
+# network, set HERMES_DASHBOARD_HOST to a non-loopback address *and* configure
+# an authentication provider; start_server fails closed otherwise.
+dash_host="${HERMES_DASHBOARD_HOST:-127.0.0.1}"
 dash_port="${HERMES_DASHBOARD_PORT:-9119}"
 
 # The dashboard's auth gate engages automatically on non-loopback binds and

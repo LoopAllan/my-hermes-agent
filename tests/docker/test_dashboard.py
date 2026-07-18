@@ -21,12 +21,7 @@ def test_dashboard_runs_by_default(
     built_image: str, container_name: str,
 ) -> None:
     """The container starts its supervised dashboard unless explicitly disabled."""
-    start_container(
-        built_image, container_name,
-        "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=admin",
-        "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=test-dashboard-pw",
-        cmd="sleep 60",
-    )
+    start_container(built_image, container_name, cmd="sleep 60")
     ok, _ = poll_container(
         container_name, "pgrep -f 'hermes dashboard'", deadline_s=30.0,
     )
@@ -52,6 +47,27 @@ def test_dashboard_slot_reports_down_when_explicitly_disabled(
     )
 
 
+def test_dashboard_slot_reports_up_when_enabled(
+    built_image: str, container_name: str,
+) -> None:
+    """Symmetry: with HERMES_DASHBOARD=1, s6-svstat reports the slot as up."""
+    # The default dashboard host is 0.0.0.0, which now engages the
+    # OAuth auth gate. Without a provider registered (no
+    # HERMES_DASHBOARD_OAUTH_CLIENT_ID in this test env), start_server
+    # would fail closed and the slot would never come up. Pin the
+    # explicit insecure opt-in to keep this test focused on the s6
+    # supervision contract, not the auth gate.
+    start_container(
+        built_image, container_name,
+        "HERMES_DASHBOARD=1",
+        "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=admin",
+        "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=test-dashboard-pw",
+        cmd="sleep 120",
+    )
+    ok, output = poll_container(
+        container_name, "/command/s6-svstat /run/service/dashboard | grep -q 'up '",
+    )
+    assert ok, f"Dashboard slot should be up with HERMES_DASHBOARD=1: {output}"
 
 
 

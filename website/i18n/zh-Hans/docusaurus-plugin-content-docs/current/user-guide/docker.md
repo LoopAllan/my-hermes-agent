@@ -60,7 +60,9 @@ docker run -d \
 
 ## 运行 dashboard
 
-内置 Web dashboard 在同一容器内作为受 s6-rc 监管的服务与 gateway 并行运行。设置 `HERMES_DASHBOARD=1` 即可拉起它：
+内置 Web dashboard 在同一容器内作为受 s6-rc 监管的服务与 gateway 并行运行。它默认在容器回环地址（`127.0.0.1`）启动，因此新容器可使用本地 Dashboard 而不会暴露未经认证的控制平面。设置 `HERMES_DASHBOARD=false` 可关闭它。
+
+如需在容器回环地址之外访问，请绑定非回环地址并配置认证提供方：
 
 ```sh
 docker run -d \
@@ -69,7 +71,9 @@ docker run -d \
   -v ~/.hermes:/opt/data \
   -p 8642:8642 \
   -p 9119:9119 \
-  -e HERMES_DASHBOARD=1 \
+  -e HERMES_DASHBOARD_HOST=0.0.0.0 \
+  -e HERMES_DASHBOARD_BASIC_AUTH_USERNAME=admin \
+  -e HERMES_DASHBOARD_BASIC_AUTH_PASSWORD="$(openssl rand -base64 24)" \
   nousresearch/hermes-agent gateway run
 ```
 
@@ -77,17 +81,17 @@ Dashboard 由 s6 监管：若进程崩溃，`s6-supervise` 会在短暂退避后
 
 | 环境变量 | 描述 | 默认值 |
 |---------------------|-------------|---------|
-| `HERMES_DASHBOARD` | 设为 `1`（或 `true` / `yes`）以启用受监管的 dashboard 服务 | *（未设置——服务已注册但保持关闭）* |
-| `HERMES_DASHBOARD_HOST` | dashboard HTTP 服务器的绑定地址 | `0.0.0.0` |
+| `HERMES_DASHBOARD` | 设为 `false`、`0` 或 `no` 可关闭受监管的 dashboard 服务（仍接受 `1` / `true` / `yes`） | 已启用 |
+| `HERMES_DASHBOARD_HOST` | dashboard HTTP 服务器的绑定地址 | `127.0.0.1` |
 | `HERMES_DASHBOARD_PORT` | dashboard HTTP 服务器的端口 | `9119` |
 | `HERMES_DASHBOARD_INSECURE` | **已弃用 / 空操作。** 以前用于绕过鉴权门控；自 2026 年 6 月的安全加固起，它不再禁用鉴权。任何非回环绑定都必须配置鉴权提供方 | *（被忽略——请改为配置提供方）* |
 
-容器内的 dashboard 默认绑定 `0.0.0.0`，否则发布的 `-p 9119:9119` 端口将无法从宿主机访问。若你要把它限制在容器回环地址（例如 sidecar / 反向代理拓扑），请显式设置 `HERMES_DASHBOARD_HOST=127.0.0.1`。
+容器内的 dashboard 默认绑定 `127.0.0.1`。Docker 的 `-p 9119:9119` 映射不会暴露仅回环监听的服务；如需从宿主机或网络访问，请设置 `HERMES_DASHBOARD_HOST=0.0.0.0`（或指定网卡）并配置下方任一认证提供方。
 
 当以下两项同时满足时，dashboard 的鉴权门控会自动启用：
 
-1. 绑定地址为非回环地址，**且**
-2. 注册了一个 `DashboardAuthProvider` 插件。
+1. 绑定地址为非回环地址，且
+2. 注册了一个 `DashboardAuthProvider` 插件。没有提供方的非回环 dashboard 会在启动时失败关闭。
 
 有三种内置方式可满足第二个条件：
 
