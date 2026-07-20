@@ -8120,9 +8120,10 @@ def _open_session_db_for_profile(profile: Optional[str], *, read_only: bool = Fa
     """
     from hermes_state import SessionDB
     if not profile:
-        return SessionDB(read_only=read_only)
+        return SessionDB(read_only=True) if read_only else SessionDB()
     _name, home = _cron_profile_home(profile)
-    return SessionDB(db_path=Path(home) / "state.db", read_only=read_only)
+    db_path = Path(home) / "state.db"
+    return SessionDB(db_path=db_path, read_only=True) if read_only else SessionDB(db_path=db_path)
 
 
 @app.get("/api/sessions/{session_id}")
