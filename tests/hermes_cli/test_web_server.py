@@ -1065,6 +1065,232 @@ class TestWebServerEndpoints:
 
 
 
+    def test_rename_session_clears_title_when_empty(self):
+        from hermes_state import SessionDB
+
+        db = SessionDB()
+        try:
+            db.create_session(session_id="clear-me", source="cli")
+            db.set_session_title("clear-me", "Has A Title")
+        finally:
+            db.close()
+
+        resp = self.client.patch("/api/sessions/clear-me", json={"title": ""})
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "title": ""}
+
+        db = SessionDB()
+        try:
+            assert db.get_session_title("clear-me") is None
+        finally:
+            db.close()
+
+    def test_rename_session_not_found(self):
+        resp = self.client.patch("/api/sessions/does-not-exist", json={"title": "x"})
+        assert resp.status_code == 404
+
+    def test_archive_session_via_patch(self):
+        """PATCH archived=true soft-hides a session; archived=false restores it."""
+        from hermes_state import SessionDB
+
+        db = SessionDB()
+        try:
+            db.create_session(session_id="arch-me", source="cli")
+            db.append_message(session_id="arch-me", role="user", content="hi")
+        finally:
+            db.close()
+
+        resp = self.client.patch("/api/sessions/arch-me", json={"archived": True})
+        assert resp.status_code == 200
+        assert resp.json()["archived"] is True
+
+        # Hidden from the default list, surfaced by archived=only.
+        listed = self.client.get("/api/sessions").json()
+        assert all(s["id"] != "arch-me" for s in listed["sessions"])
+        only = self.client.get("/api/sessions?archived=only").json()
+        assert any(s["id"] == "arch-me" for s in only["sessions"])
+
+        resp = self.client.patch("/api/sessions/arch-me", json={"archived": False})
+        assert resp.status_code == 200
+        restored = self.client.get("/api/sessions").json()
+        assert any(s["id"] == "arch-me" for s in restored["sessions"])
+
+    def test_patch_session_without_fields_is_400(self):
+        """An existing session + empty body is a bad request, not a 404."""
+        from hermes_state import SessionDB
+
+        db = SessionDB()
+        try:
+            db.create_session(session_id="no-fields", source="cli")
+        finally:
+            db.close()
+
+        resp = self.client.patch("/api/sessions/no-fields", json={})
+        assert resp.status_code == 400
+
+    def test_profiles_sessions_tags_default_profile(self):
+        """The cross-profile aggregator returns the default profile's rows
+        tagged profile="default" (single-profile parity with /api/sessions)."""
+        from hermes_state import SessionDB
+
+        db = SessionDB()
+        try:
+            db.create_session(session_id="agg-me", source="cli")
+            db.append_message(session_id="agg-me", role="user", content="hi")
+        finally:
+            db.close()
+
+        resp = self.client.get("/api/profiles/sessions?limit=20&min_messages=0")
+        assert resp.status_code == 200
+        data = resp.json()
+        row = next(s for s in data["sessions"] if s["id"] == "agg-me")
+        assert row["profile"] == "default"
+        assert row["is_default_profile"] is True
+        assert isinstance(data.get("errors"), list)
+
+    def test_profiles_sessions_rejects_unknown_archived_value(self):
+        resp = self.client.get("/api/profiles/sessions?archived=bogus")
+        assert resp.status_code == 400
+
+    def test_sessions_endpoint_reads_requested_profile(self):
+        """The machine dashboard's global profile switcher must retarget
+        the Sessions page, not just config/skills/model pages."""
+        from hermes_state import SessionDB
+        from hermes_cli import profiles as profiles_mod
+
+        worker_home = profiles_mod.get_profile_dir("worker")
+        worker_home.mkdir(parents=True)
+
+        default_db = SessionDB()
+        try:
+            default_db.create_session(session_id="default-only", source="cli")
+            default_db.append_message("default-only", role="user", content="default")
+        finally:
+            default_db.close()
+
+        worker_db = SessionDB(db_path=worker_home / "state.db")
+        try:
+            worker_db.create_session(session_id="worker-only", source="cli")
+            worker_db.append_message("worker-only", role="user", content="worker")
+        finally:
+            worker_db.close()
+
+        resp = self.client.get("/api/sessions?profile=worker&limit=20&min_messages=0")
+        assert resp.status_code == 200
+        data = resp.json()
+        ids = {s["id"] for s in data["sessions"]}
+        assert "worker-only" in ids
+        assert "default-only" not in ids
+        row = next(s for s in data["sessions"] if s["id"] == "worker-only")
+        assert row["profile"] == "worker"
+        assert row["is_default_profile"] is False
+
+        stats = self.client.get("/api/sessions/stats?profile=worker").json()
+        assert stats["total"] == 1
+        assert stats["messages"] == 1
+
+        messages = self.client.get("/api/sessions/worker-only/messages?profile=worker").json()
+        assert [m["content"] for m in messages["messages"]] == ["worker"]
+
+    def test_analytics_endpoints_read_requested_profile(self, monkeypatch):
+        from hermes_state import SessionDB
+        from hermes_cli import profiles as profiles_mod
+
+        worker_home = profiles_mod.get_profile_dir("worker")
+        worker_home.mkdir(parents=True)
+
+        default_db = SessionDB()
+        try:
+            default_db.create_session(session_id="default-usage", source="cli", model="default/model")
+            default_db.update_token_counts("default-usage", input_tokens=10, output_tokens=5)
+        finally:
+            default_db.close()
+
+        worker_db = SessionDB(db_path=worker_home / "state.db")
+        try:
+            worker_db.create_session(session_id="worker-usage", source="cli", model="worker/model")
+            worker_db.update_token_counts(
+                "worker-usage",
+                input_tokens=123,
+                output_tokens=45,
+                billing_provider="worker-provider",
+            )
+        finally:
+            worker_db.close()
+
+        opened_read_only = []
+        original_init = SessionDB.__init__
+
+        def record_open_mode(instance, *args, **kwargs):
+            opened_read_only.append(kwargs.get("read_only", False))
+            return original_init(instance, *args, **kwargs)
+
+        monkeypatch.setattr(SessionDB, "__init__", record_open_mode)
+
+        usage = self.client.get("/api/analytics/usage?days=7&profile=worker").json()
+        assert usage["totals"]["total_sessions"] == 1
+        assert usage["totals"]["total_input"] == 123
+        assert [m["model"] for m in usage["by_model"]] == ["worker/model"]
+
+        models = self.client.get("/api/analytics/models?days=7&profile=worker").json()
+        assert models["totals"]["distinct_models"] == 1
+        assert models["totals"]["total_input"] == 123
+        assert models["models"][0]["model"] == "worker/model"
+        assert models["models"][0]["provider"] == "worker-provider"
+        assert opened_read_only == [True, True]
+
+        default_usage = self.client.get("/api/analytics/usage?days=7").json()
+        assert default_usage["totals"]["total_input"] == 10
+        assert default_usage["totals"]["total_output"] == 5
+
+    def test_get_sessions_rejects_unknown_archived_value(self):
+        resp = self.client.get("/api/sessions?archived=bogus")
+        assert resp.status_code == 400
+
+    def test_get_sessions_rejects_unknown_order_value(self):
+        resp = self.client.get("/api/sessions?order=sideways")
+        assert resp.status_code == 400
+
+    def test_get_sessions_order_recent_surfaces_compression_tip(self):
+        """A long-running conversation that auto-compresses must stay on the
+        first page by recency, listed under its live continuation id."""
+        import time as _time
+
+        from hermes_state import SessionDB
+
+        db = SessionDB()
+        try:
+            old = _time.time() - 86_400
+            # Old conversation that later compresses into a fresh continuation.
+            # The continuation must start at/after the parent's ended_at to be
+            # recognised as a compression tip (not a sub-agent/branch).
+            db.create_session(session_id="root-old", source="cli")
+            db.append_message(session_id="root-old", role="user", content="kickoff")
+            db.end_session("root-old", "compression")
+            db._conn.execute(
+                "UPDATE sessions SET started_at = ?, ended_at = ? WHERE id = ?",
+                (old, old + 10, "root-old"),
+            )
+            db.create_session(session_id="tip-new", source="cli", parent_session_id="root-old")
+            db._conn.execute("UPDATE sessions SET started_at = ? WHERE id = ?", (old + 10, "tip-new"))
+            db.append_message(session_id="tip-new", role="user", content="continued just now")
+            # A brand-new unrelated session started after the root but before now.
+            db.create_session(session_id="mid", source="cli")
+            db._conn.execute("UPDATE sessions SET started_at = ? WHERE id = ?", (_time.time() - 3600, "mid"))
+            db.append_message(session_id="mid", role="user", content="hello")
+            db._conn.commit()
+        finally:
+            db.close()
+
+        rows = self.client.get("/api/sessions?order=recent&limit=5").json()["sessions"]
+        ids = [r["id"] for r in rows]
+        # The compressed conversation surfaces under its live tip id...
+        assert "tip-new" in ids
+        # ...carrying the durable lineage root so the desktop can match pins.
+        tip = next(r for r in rows if r["id"] == "tip-new")
+        assert tip.get("_lineage_root_id") == "root-old"
+
+
     def test_import_sessions_endpoint_imports_exported_json(self):
         from hermes_state import SessionDB
 
