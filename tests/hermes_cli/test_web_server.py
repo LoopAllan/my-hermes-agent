@@ -825,7 +825,7 @@ class TestWebServerEndpoints:
         messages = self.client.get("/api/sessions/worker-only/messages?profile=worker").json()
         assert [m["content"] for m in messages["messages"]] == ["worker"]
 
-    def test_analytics_endpoints_read_requested_profile(self):
+    def test_analytics_endpoints_read_requested_profile(self, monkeypatch):
         from hermes_state import SessionDB
         from hermes_cli import profiles as profiles_mod
 
@@ -851,6 +851,15 @@ class TestWebServerEndpoints:
         finally:
             worker_db.close()
 
+        opened_read_only = []
+        original_init = SessionDB.__init__
+
+        def record_open_mode(instance, *args, **kwargs):
+            opened_read_only.append(kwargs.get("read_only", False))
+            return original_init(instance, *args, **kwargs)
+
+        monkeypatch.setattr(SessionDB, "__init__", record_open_mode)
+
         usage = self.client.get("/api/analytics/usage?days=7&profile=worker").json()
         assert usage["totals"]["total_sessions"] == 1
         assert usage["totals"]["total_input"] == 123
@@ -861,6 +870,7 @@ class TestWebServerEndpoints:
         assert models["totals"]["total_input"] == 123
         assert models["models"][0]["model"] == "worker/model"
         assert models["models"][0]["provider"] == "worker-provider"
+        assert opened_read_only == [True, True]
 
         default_usage = self.client.get("/api/analytics/usage?days=7").json()
         assert default_usage["totals"]["total_input"] == 10
