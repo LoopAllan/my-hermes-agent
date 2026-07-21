@@ -16,9 +16,9 @@ LINE is the dominant messaging app in Japan, Taiwan, and Thailand. If your users
 
 | Context | Behavior |
 |---------|----------|
-| **1:1 chat** (`U` IDs) | Responds to every message |
-| **Group chat** (`C` IDs) | Responds when the group is on the allowlist |
-| **Multi-user room** (`R` IDs) | Responds when the room is on the allowlist |
+| **1:1 chat** (`U` IDs) | Responds when the sender is on `allowed_users` |
+| **Group chat** (`C` IDs) | Responds when the group is allowlisted; optionally requires an @mention |
+| **Multi-user room** (`R` IDs) | Responds when the room is allowlisted; optionally requires an @mention |
 
 Inbound text, images, audio, video, files, stickers, and locations are all handled. Outbound text uses the **free reply token first** (single-use, ~60s window) and falls back to the metered Push API when the token has expired.
 
@@ -57,30 +57,50 @@ Copy the `https://...` URL — you'll set it as the webhook URL below. **Leave t
 
 ## Step 3: Configure Hermes
 
-Add to `~/.hermes/.env`:
+Add the credentials to `~/.hermes/.env`:
 
 ```env
 LINE_CHANNEL_ACCESS_TOKEN=YOUR_LONG_LIVED_TOKEN
 LINE_CHANNEL_SECRET=YOUR_CHANNEL_SECRET
 
-# Allowlist — at least one of these (or LINE_ALLOW_ALL_USERS=true for dev)
-LINE_ALLOWED_USERS=U1234567890abcdef...           # comma-separated U-prefixed IDs
-LINE_ALLOWED_GROUPS=C1234567890abcdef...          # optional group IDs
-LINE_ALLOWED_ROOMS=R1234567890abcdef...           # optional room IDs
-
 # Required for image / audio / video sends — the public HTTPS base URL
-# the tunnel resolves to.  Without it, send_image/voice/video will refuse.
+# the tunnel resolves to. Without it, send_image/voice/video will refuse.
 LINE_PUBLIC_URL=https://my-tunnel.example.com
 ```
 
-Then in `~/.hermes/config.yaml`:
+Then configure access controls in `~/.hermes/config.yaml`:
 
 ```yaml
 gateway:
   platforms:
     line:
       enabled: true
+      # `allowed_users` accepts multiple LINE user IDs for DMs.
+      allowed_users:
+        - U1234567890abcdef...
+        - Uabcdef1234567890...
+      allowed_groups:
+        - C1234567890abcdef...
+      allowed_rooms:
+        - R1234567890abcdef...
+      # Applies only to groups and rooms; DMs remain available to allowlisted users.
+      require_mention: true
 ```
+
+For backward-compatible environment-variable configuration, use a comma-separated
+list (no spaces are required) and set `LINE_REQUIRE_MENTION=true`:
+
+```env
+LINE_ALLOWED_USERS=U1234567890abcdef...,Uabcdef1234567890...
+LINE_ALLOWED_GROUPS=C1234567890abcdef...
+LINE_ALLOWED_ROOMS=R1234567890abcdef...
+LINE_REQUIRE_MENTION=true
+```
+
+`require_mention` uses LINE's structured mention metadata, rather than matching
+text against a display name. If enabled, an allowlisted group or room message is
+ignored unless it explicitly mentions the bot. When both are set, the corresponding
+`LINE_*` environment variable overrides the `config.yaml` value.
 
 That's enough — the bundled-plugin scan in `gateway/config.py` automatically picks up `plugins/platforms/line/`. No `Platform.LINE` enum edit, no `_create_adapter` registration.
 
@@ -165,9 +185,10 @@ Cron jobs with `deliver: line` route to `LINE_HOME_CHANNEL`. The adapter ships a
 | `LINE_HOST` | no | `0.0.0.0` | Webhook bind host |
 | `LINE_PORT` | no | `8646` | Webhook bind port |
 | `LINE_PUBLIC_URL` | for media | — | Public HTTPS base URL; required for image/voice/video sends |
-| `LINE_ALLOWED_USERS` | one of | — | Comma-separated user IDs (U-prefixed) |
-| `LINE_ALLOWED_GROUPS` | one of | — | Comma-separated group IDs (C-prefixed) |
-| `LINE_ALLOWED_ROOMS` | one of | — | Comma-separated room IDs (R-prefixed) |
+| `LINE_ALLOWED_USERS` | one of | — | Comma-separated user IDs (U-prefixed) for DMs |
+| `LINE_ALLOWED_GROUPS` | groups | — | Comma-separated group IDs (C-prefixed) |
+| `LINE_ALLOWED_ROOMS` | rooms | — | Comma-separated room IDs (R-prefixed) |
+| `LINE_REQUIRE_MENTION` | no | `false` | Require an explicit bot @mention for group and room messages; DMs are unaffected |
 | `LINE_ALLOW_ALL_USERS` | dev only | `false` | Skip allowlist entirely |
 | `LINE_HOME_CHANNEL` | no | — | Default cron / notification delivery target |
 | `LINE_SLOW_RESPONSE_THRESHOLD` | no | `45` | Seconds before the postback button fires (`0` = disabled) |
@@ -182,7 +203,7 @@ Cron jobs with `deliver: line` route to `LINE_HOME_CHANNEL`. The adapter ships a
 
 **"invalid signature" on webhook verify.** The `Channel secret` was copied wrong, or your tunnel rewrote the request body. Verify with `curl -i https://<tunnel>/line/webhook/health` first — that should return `{"status":"ok","platform":"line"}`.
 
-**Bot receives nothing in groups.** Check `LINE_ALLOWED_GROUPS` includes the `C...` group ID. To find a group ID, send a test message and grep `~/.hermes/logs/gateway.log` for `LINE: rejecting unauthorized source` — the rejected source dict has the IDs.
+**Bot receives nothing in groups or rooms.** Check that the conversation ID is in `LINE_ALLOWED_GROUPS` (`C...`) or `LINE_ALLOWED_ROOMS` (`R...`). If `LINE_REQUIRE_MENTION=true` (or `require_mention: true`) is enabled, the message must also explicitly @mention the bot. To find IDs, send a test message and grep `~/.hermes/logs/gateway.log` for `LINE: rejecting unauthorized source` — the rejected source dict has the IDs.
 
 **`send_image` fails with "LINE_PUBLIC_URL must be set".** LINE's Messaging API does not accept binary uploads — images, audio, and video must be reachable HTTPS URLs. Set `LINE_PUBLIC_URL` to the tunnel's public hostname and the adapter will serve files from `/line/media/<token>/<filename>` automatically.
 

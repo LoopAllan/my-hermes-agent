@@ -438,6 +438,18 @@ def _allowed_for_source(
     return False
 
 
+def _message_mentions_user(message: Dict[str, Any], user_id: Optional[str]) -> bool:
+    """Return whether a LINE text-message mention targets ``user_id``."""
+    if not user_id:
+        return False
+    mention = (message or {}).get("mention") or {}
+    mentionees = mention.get("mentionees") or []
+    return any(
+        isinstance(mentionee, dict) and mentionee.get("userId") == user_id
+        for mentionee in mentionees
+    )
+
+
 # ---------------------------------------------------------------------------
 # LINE Reply / Push HTTP client
 # ---------------------------------------------------------------------------
@@ -688,6 +700,9 @@ class LineAdapter(BasePlatformAdapter):
         self.allowed_rooms = _csv_set(
             os.getenv("LINE_ALLOWED_ROOMS", "")
         ) | set(extra.get("allowed_rooms", []))
+        self.require_mention = _truthy_env(
+            "LINE_REQUIRE_MENTION", bool(extra.get("require_mention", False))
+        )
 
         # Slow-LLM postback button threshold
         try:
@@ -918,6 +933,15 @@ class LineAdapter(BasePlatformAdapter):
             room_ids=self.allowed_rooms,
         ):
             logger.info("LINE: rejecting unauthorized source %s", source)
+            return
+
+        if (
+            event_type == "message"
+            and self.require_mention
+            and source.get("type") in {"group", "room"}
+            and not _message_mentions_user(event.get("message") or {}, self._bot_user_id)
+        ):
+            logger.debug("LINE: ignoring group/room message without bot mention")
             return
 
         if event_type == "message":

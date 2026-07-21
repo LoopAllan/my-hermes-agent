@@ -43,6 +43,10 @@ optional_env:
     description: "Comma-separated LINE user IDs allowed to DM the bot (U-prefixed)"
     prompt: "Allowed user IDs (comma-separated)"
     password: false
+  - name: LINE_REQUIRE_MENTION
+    description: "Require an explicit bot @mention in groups and rooms (DMs unaffected; overrides config.yaml)"
+    prompt: "Require @mention in groups and rooms? (true/false)"
+    password: false
   - name: LINE_ALLOWED_GROUPS
     description: "Comma-separated LINE group IDs the bot will respond in (C-prefixed)"
     prompt: "Allowed group IDs (comma-separated)"

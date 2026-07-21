@@ -136,19 +136,125 @@ class TestAllowlist:
         src = {"type": "user", "userId": "Uother"}
         assert not _allowed_for_source(src, allow_all=False, user_ids={"Uok"}, group_ids=set(), room_ids=set())
 
-    def test_group_uses_group_list_not_user_list(self):
+    def test_group_requires_only_the_group_allowlist(self):
         src = {"type": "group", "groupId": "Cok", "userId": "Uany"}
-        assert _allowed_for_source(src, allow_all=False, user_ids={"Uany"}, group_ids={"Cok"}, room_ids=set())
-        assert not _allowed_for_source(src, allow_all=False, user_ids={"Uany"}, group_ids=set(), room_ids=set())
+        assert _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids={"Cok"}, room_ids=set())
+        assert not _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids=set(), room_ids=set())
 
-    def test_room_uses_room_list(self):
-        src = {"type": "room", "roomId": "Rok"}
+    def test_room_requires_only_the_room_allowlist(self):
+        src = {"type": "room", "roomId": "Rok", "userId": "Uany"}
         assert _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids=set(), room_ids={"Rok"})
         assert not _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids=set(), room_ids=set())
 
     def test_unknown_type_rejected(self):
         src = {"type": "weird"}
         assert not _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids=set(), room_ids=set())
+
+
+# ---------------------------------------------------------------------------
+# 3b. Group/room mention gate
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("source",),
+    [
+        ({"type": "group", "groupId": "Cok", "userId": "Uok"},),
+        ({"type": "room", "roomId": "Rok", "userId": "Uok"},),
+    ],
+)
+def test_group_and_room_messages_require_a_native_bot_mention(source):
+    from gateway.config import PlatformConfig
+
+    cfg = PlatformConfig(
+        enabled=True,
+        extra={
+            "channel_access_token": "tok",
+            "channel_secret": "sec",
+            "allowed_users": ["Uok"],
+            "allowed_groups": ["Cok"],
+            "allowed_rooms": ["Rok"],
+            "require_mention": True,
+        },
+    )
+    adapter = LineAdapter(cfg)
+    adapter._bot_user_id = "Ubot"
+    adapter._handle_message_event = AsyncMock()
+
+    event = {
+        "type": "message",
+        "source": source,
+        "message": {"type": "text", "id": "m1", "text": "ordinary message"},
+    }
+    asyncio.run(adapter._dispatch_event(event))
+
+    adapter._handle_message_event.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("source",),
+    [
+        ({"type": "group", "groupId": "Cok", "userId": "Uok"},),
+        ({"type": "room", "roomId": "Rok", "userId": "Uok"},),
+    ],
+)
+def test_group_and_room_messages_accept_a_native_bot_mention(source):
+    from gateway.config import PlatformConfig
+
+    cfg = PlatformConfig(
+        enabled=True,
+        extra={
+            "channel_access_token": "tok",
+            "channel_secret": "sec",
+            "allowed_users": ["Uok"],
+            "allowed_groups": ["Cok"],
+            "allowed_rooms": ["Rok"],
+            "require_mention": True,
+        },
+    )
+    adapter = LineAdapter(cfg)
+    adapter._bot_user_id = "Ubot"
+    adapter._handle_message_event = AsyncMock()
+
+    event = {
+        "type": "message",
+        "source": source,
+        "message": {
+            "type": "text",
+            "id": "m1",
+            "text": "@bot hello",
+            "mention": {"mentionees": [{"userId": "Ubot", "index": 0, "length": 4}]},
+        },
+    }
+    asyncio.run(adapter._dispatch_event(event))
+
+    adapter._handle_message_event.assert_awaited_once_with(event)
+
+
+def test_require_mention_does_not_gate_direct_messages():
+    from gateway.config import PlatformConfig
+
+    adapter = LineAdapter(
+        PlatformConfig(
+            enabled=True,
+            extra={
+                "channel_access_token": "tok",
+                "channel_secret": "sec",
+                "allowed_users": ["Uok"],
+                "require_mention": True,
+            },
+        )
+    )
+    adapter._bot_user_id = "Ubot"
+    adapter._handle_message_event = AsyncMock()
+    event = {
+        "type": "message",
+        "source": {"type": "user", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "ordinary direct message"},
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    adapter._handle_message_event.assert_awaited_once_with(event)
 
 
 # ---------------------------------------------------------------------------
@@ -632,6 +738,17 @@ class TestAdapterInit:
         ad = LineAdapter(PlatformConfig(enabled=True))
         assert ad.allowed_users == {"U1", "U2", "U3"}
         assert ad.allowed_groups == {"C1"}
+
+    def test_require_mention_uses_config_and_env_override(self, monkeypatch):
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "t")
+        monkeypatch.setenv("LINE_CHANNEL_SECRET", "s")
+        from gateway.config import PlatformConfig
+
+        cfg = PlatformConfig(enabled=True, extra={"require_mention": True})
+        assert LineAdapter(cfg).require_mention
+
+        monkeypatch.setenv("LINE_REQUIRE_MENTION", "false")
+        assert not LineAdapter(cfg).require_mention
 
     def test_get_chat_info_infers_type_from_prefix(self, monkeypatch):
         monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "t")
