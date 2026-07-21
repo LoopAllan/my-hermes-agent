@@ -1,10 +1,9 @@
-"""Harness: dashboard opt-in via HERMES_DASHBOARD.
+"""Docker integration coverage for the supervised Dashboard service.
 
-Today (tini): dashboard starts once when HERMES_DASHBOARD=1; if it crashes
-it stays dead. After Phase 2 (s6): dashboard starts once; if it crashes
-it is restarted under supervision. The restart-after-crash test lives in
-Phase 2 Task 2.5; this file only locks the opt-in surface (which must
-not change between tini and s6).
+The dashboard starts by default and can be disabled with
+``HERMES_DASHBOARD=false``. Explicitly setting ``HERMES_DASHBOARD=1`` remains
+supported. The restart-after-crash test lives elsewhere; this file locks the
+default-start and opt-out contract across the container lifecycle.
 
 Every ``docker exec`` here runs as the unprivileged ``hermes`` user
 (via :func:`docker_exec`/:func:`docker_exec_sh` in conftest), matching
@@ -18,30 +17,30 @@ import time
 from tests.docker.conftest import docker_exec, docker_exec_sh, start_container, poll_container
 
 
-def test_dashboard_not_running_by_default(
+def test_dashboard_runs_by_default(
     built_image: str, container_name: str,
 ) -> None:
-    """Without HERMES_DASHBOARD, no dashboard process should be running."""
+    """The container starts its supervised dashboard unless explicitly disabled."""
     start_container(built_image, container_name, cmd="sleep 60")
-    r = docker_exec(container_name, "pgrep", "-f", "hermes dashboard")
-    # pgrep exits non-zero when no match found
-    assert r.returncode != 0, (
-        "Dashboard should not be running without HERMES_DASHBOARD"
+    # A transient subprocess is insufficient: the regression this protects
+    # against launched Dashboard then immediately failed its auth/bind path.
+    # Require both a live loopback HTTP endpoint and an active s6 service slot.
+    ok, output = poll_container(
+        container_name,
+        "curl -fsS -m 2 http://127.0.0.1:9119/api/status >/dev/null "
+        "&& /command/s6-svstat /run/service/dashboard | grep -q 'up '",
+        deadline_s=30.0,
     )
+    assert ok, f"Dashboard should be ready by default: {output}"
 
 
-def test_dashboard_slot_reports_down_when_disabled(
+def test_dashboard_slot_reports_down_when_explicitly_disabled(
     built_image: str, container_name: str,
 ) -> None:
-    """Without HERMES_DASHBOARD, s6-svstat should report the dashboard
-    slot as DOWN (not up-with-sleep-infinity, which would
-    false-positive `hermes doctor` and any other health check).
-
-    Locks the PR #30136 review item I3 fix: cont-init.d/03-dashboard-toggle
-    writes a `down` marker file in the live service-dir when
-    HERMES_DASHBOARD is unset, so the slot reflects reality.
-    """
-    start_container(built_image, container_name, cmd="sleep 60")
+    """HERMES_DASHBOARD=false opts out of the default dashboard service."""
+    start_container(
+        built_image, container_name, "HERMES_DASHBOARD=false", cmd="sleep 60",
+    )
     # /command/ isn't on PATH for docker-exec sessions, so call by
     # absolute path.
     r = docker_exec(
@@ -49,7 +48,7 @@ def test_dashboard_slot_reports_down_when_disabled(
     )
     assert r.returncode == 0, f"s6-svstat failed: {r.stderr!r} / {r.stdout!r}"
     assert "down" in r.stdout, (
-        f"Dashboard slot should be 'down' without HERMES_DASHBOARD; "
+        f"Dashboard slot should be 'down' with HERMES_DASHBOARD=false; "
         f"svstat reports: {r.stdout!r}"
     )
 
@@ -71,8 +70,10 @@ def test_dashboard_slot_reports_up_when_enabled(
         "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=test-dashboard-pw",
         cmd="sleep 120",
     )
-    # uvicorn takes a moment to bind; poll svstat.
-    poll_container(container_name, "/command/s6-svstat /run/service/dashboard | grep -q 'up '")
+    ok, output = poll_container(
+        container_name, "/command/s6-svstat /run/service/dashboard | grep -q 'up '",
+    )
+    assert ok, f"Dashboard slot should be up with HERMES_DASHBOARD=1: {output}"
 
 
 def test_dashboard_opt_in_starts(
