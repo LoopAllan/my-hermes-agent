@@ -8111,19 +8111,19 @@ async def get_session_stats(profile: Optional[str] = None):
         db.close()
 
 
-def _open_session_db_for_profile(profile: Optional[str]):
-    """Open a SessionDB for read paths, optionally for another profile.
+def _open_session_db_for_profile(profile: Optional[str], *, read_only: bool = False):
+    """Open a SessionDB for the requested profile.
 
-    ``profile`` None/empty → this process's own ``state.db`` (the common,
-    single-profile case). A named profile opens that profile's on-disk
-    ``state.db`` directly so the primary backend can serve cross-profile reads
-    (transcripts, detail) without spawning that profile's backend.
+    ``read_only`` is for polling/analytics endpoints. It prevents a dashboard
+    from taking a write lock or attempting schema reconciliation against a
+    live, externally-mounted profile database.
     """
     from hermes_state import SessionDB
     if not profile:
-        return SessionDB()
+        return SessionDB(read_only=True) if read_only else SessionDB()
     _name, home = _cron_profile_home(profile)
-    return SessionDB(db_path=Path(home) / "state.db")
+    db_path = Path(home) / "state.db"
+    return SessionDB(db_path=db_path, read_only=True) if read_only else SessionDB(db_path=db_path)
 
 
 @app.get("/api/sessions/{session_id}")
@@ -11837,7 +11837,7 @@ async def update_config_raw(body: RawConfigUpdate, profile: Optional[str] = None
 async def get_usage_analytics(days: int = 30, profile: Optional[str] = None):
     from agent.insights import InsightsEngine
 
-    db = _open_session_db_for_profile(profile)
+    db = _open_session_db_for_profile(profile, read_only=bool(profile))
     try:
         cutoff = time.time() - (days * 86400)
         cur = db._conn.execute("""
@@ -11908,7 +11908,7 @@ async def get_models_analytics(days: int = 30, profile: Optional[str] = None):
     Returns token/cost/session breakdown per model plus capability metadata
     from models.dev (context window, vision, tools, reasoning, etc.).
     """
-    db = _open_session_db_for_profile(profile)
+    db = _open_session_db_for_profile(profile, read_only=bool(profile))
     try:
         cutoff = time.time() - (days * 86400)
 
