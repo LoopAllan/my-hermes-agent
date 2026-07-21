@@ -472,6 +472,11 @@ export const api = {
       appendProfileParam(`/api/analytics/models?days=${days}`, profile),
     ),
   getConfig: () => fetchJSON<Record<string, unknown>>("/api/config"),
+  // Dashboard display settings belong to the Dashboard itself, rather than
+  // whichever managed profile is currently selected.  Explicit `current`
+  // bypasses fetchJSON's automatic profile query injection.
+  getDashboardConfig: () =>
+    fetchJSON<Record<string, unknown>>("/api/config?profile=current"),
   getDefaults: () => fetchJSON<Record<string, unknown>>("/api/config/defaults"),
   getSchema: () => fetchJSON<{ fields: Record<string, unknown>; category_order: string[] }>("/api/config/schema"),
   getModelInfo: () => fetchJSON<ModelInfoResponse>("/api/model/info"),

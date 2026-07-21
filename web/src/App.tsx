@@ -386,7 +386,7 @@ export default function App() {
   const [showTokenAnalytics, setShowTokenAnalytics] = useState(false);
   useEffect(() => {
     api
-      .getConfig()
+      .getDashboardConfig()
       .then((cfg) => {
         const dash = (cfg?.dashboard ?? {}) as {
           show_token_analytics?: unknown;
