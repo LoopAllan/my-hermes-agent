@@ -1078,7 +1078,7 @@ export default function ModelsPage() {
 
   useEffect(() => {
     api
-      .getConfig()
+      .getDashboardConfig()
       .then((cfg) => {
         const dash = (cfg?.dashboard ?? {}) as { show_token_analytics?: unknown };
         setShowTokens(dash.show_token_analytics === true);
