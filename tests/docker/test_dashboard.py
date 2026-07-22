@@ -1,9 +1,9 @@
 """Docker integration coverage for the supervised Dashboard service.
 
-The dashboard starts by default and can be disabled with
-``HERMES_DASHBOARD=false``. Explicitly setting ``HERMES_DASHBOARD=1`` remains
-supported. The restart-after-crash test lives elsewhere; this file locks the
-default-start and opt-out contract across the container lifecycle.
+The dashboard is disabled by default and starts only when
+``HERMES_DASHBOARD=1`` (or another supported truthy value) is set. The
+restart-after-crash test lives elsewhere; this file locks the opt-in contract
+across the container lifecycle.
 
 Every ``docker exec`` here runs as the unprivileged ``hermes`` user
 (via :func:`docker_exec`/:func:`docker_exec_sh` in conftest), matching
@@ -17,27 +17,25 @@ import time
 from tests.docker.conftest import docker_exec, docker_exec_sh, start_container, poll_container
 
 
-def test_dashboard_runs_by_default(
+def test_dashboard_slot_reports_down_by_default(
     built_image: str, container_name: str,
 ) -> None:
-    """The container starts its supervised dashboard unless explicitly disabled."""
+    """The supervised dashboard is disabled when HERMES_DASHBOARD is unset."""
     start_container(built_image, container_name, cmd="sleep 60")
-    # A transient subprocess is insufficient: the regression this protects
-    # against launched Dashboard then immediately failed its auth/bind path.
-    # Require both a live loopback HTTP endpoint and an active s6 service slot.
-    ok, output = poll_container(
-        container_name,
-        "curl -fsS -m 2 http://127.0.0.1:9119/api/status >/dev/null "
-        "&& /command/s6-svstat /run/service/dashboard | grep -q 'up '",
-        deadline_s=30.0,
+    r = docker_exec(
+        container_name, "/command/s6-svstat", "/run/service/dashboard",
     )
-    assert ok, f"Dashboard should be ready by default: {output}"
+    assert r.returncode == 0, f"s6-svstat failed: {r.stderr!r} / {r.stdout!r}"
+    assert "down" in r.stdout, (
+        f"Dashboard slot should be down when HERMES_DASHBOARD is unset; "
+        f"svstat reports: {r.stdout!r}"
+    )
 
 
 def test_dashboard_slot_reports_down_when_explicitly_disabled(
     built_image: str, container_name: str,
 ) -> None:
-    """HERMES_DASHBOARD=false opts out of the default dashboard service."""
+    """HERMES_DASHBOARD=false keeps the opt-in dashboard service disabled."""
     start_container(
         built_image, container_name, "HERMES_DASHBOARD=false", cmd="sleep 60",
     )
@@ -57,38 +55,33 @@ def test_dashboard_slot_reports_up_when_enabled(
     built_image: str, container_name: str,
 ) -> None:
     """Symmetry: with HERMES_DASHBOARD=1, s6-svstat reports the slot as up."""
-    # The default dashboard host is 0.0.0.0, which now engages the
-    # OAuth auth gate. Without a provider registered (no
-    # HERMES_DASHBOARD_OAUTH_CLIENT_ID in this test env), start_server
-    # would fail closed and the slot would never come up. Pin the
-    # explicit insecure opt-in to keep this test focused on the s6
-    # supervision contract, not the auth gate.
+    # The opt-in path defaults to a loopback bind, which needs no auth provider.
+    # This is intentionally the minimal documented configuration.
     start_container(
         built_image, container_name,
         "HERMES_DASHBOARD=1",
-        "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=admin",
-        "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=test-dashboard-pw",
         cmd="sleep 120",
     )
     ok, output = poll_container(
-        container_name, "/command/s6-svstat /run/service/dashboard | grep -q 'up '",
+        container_name,
+        "curl -fsS -m 2 http://127.0.0.1:9119/api/status >/dev/null "
+        "&& /command/s6-svstat /run/service/dashboard | grep -q 'up '",
     )
-    assert ok, f"Dashboard slot should be up with HERMES_DASHBOARD=1: {output}"
+    assert ok, (
+        "Dashboard should be ready on loopback with HERMES_DASHBOARD=1: "
+        f"{output}"
+    )
 
 
 def test_dashboard_opt_in_starts(
     built_image: str, container_name: str,
 ) -> None:
     """With HERMES_DASHBOARD=1, a dashboard process should be visible."""
-    # Default bind is 0.0.0.0, which engages the auth gate. Register the
-    # bundled basic password provider so the gate has a provider and the
-    # dashboard binds (vs fail-closed). Keeps the test focused on s6
-    # supervision, not auth.
+    # Default loopback bind needs no auth provider; the public-bind auth path is
+    # covered by the OAuth tests below.
     start_container(
         built_image, container_name,
         "HERMES_DASHBOARD=1",
-        "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=admin",
-        "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=test-dashboard-pw",
         cmd="sleep 120",
     )
     # Poll for the dashboard subprocess to appear — the entrypoint
