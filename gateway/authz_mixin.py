@@ -312,11 +312,12 @@ class GatewayAuthorizationMixin:
         if plugin_entry and plugin_entry.chat_allowlist_authorization_config_key:
             platform_config = getattr(self.config, "platforms", {}).get(source.platform)
             if platform_config:
-                plugin_chat_allowlist_enabled = bool(
+                plugin_chat_allowlist_enabled = (
                     platform_config.extra.get(
                         plugin_entry.chat_allowlist_authorization_config_key,
                         False,
                     )
+                    is True
                 )
 
         # Telegram and QQBot retain their built-in chat allowlists.  Plugins

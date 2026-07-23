@@ -994,6 +994,20 @@ def load_gateway_config() -> GatewayConfig:
                     continue
                 # Collect bridgeable keys from this platform section
                 bridged = {}
+                # Plugins may declare a config key that gates their
+                # sender-independent chat allowlists.  Bridge it generically
+                # so ``gateway.platforms.<plugin>.<key>`` is the documented
+                # user-facing form, without growing another platform-specific
+                # branch in the loader.
+                if _pr is not None:
+                    _entry = _pr.get(plat.value)
+                    _chat_authz_key = (
+                        _entry.chat_allowlist_authorization_config_key
+                        if _entry is not None
+                        else ""
+                    )
+                    if _chat_authz_key and _chat_authz_key in platform_cfg:
+                        bridged[_chat_authz_key] = platform_cfg[_chat_authz_key]
                 if "unauthorized_dm_behavior" in platform_cfg:
                     bridged["unauthorized_dm_behavior"] = _normalize_unauthorized_dm_behavior(
                         platform_cfg.get("unauthorized_dm_behavior"),
