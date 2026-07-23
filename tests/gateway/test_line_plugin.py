@@ -538,6 +538,9 @@ class TestRegister:
         register(ctx)
         assert ctx.kwargs["allowed_users_env"] == "LINE_ALLOWED_USERS"
         assert ctx.kwargs["allow_all_env"] == "LINE_ALLOW_ALL_USERS"
+        assert ctx.kwargs["allowed_group_chats_env"] == "LINE_ALLOWED_GROUPS"
+        assert ctx.kwargs["allowed_room_chats_env"] == "LINE_ALLOWED_ROOMS"
+        assert ctx.kwargs["chat_allowlist_authorization_config_key"] == "authorize_allowed_chats"
 
     def test_register_wires_cron_home_channel(self):
         ctx = self._FakeCtx()
