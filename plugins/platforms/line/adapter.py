@@ -1658,6 +1658,9 @@ def register(ctx) -> None:
         standalone_sender_fn=_standalone_send,
         allowed_users_env="LINE_ALLOWED_USERS",
         allow_all_env="LINE_ALLOW_ALL_USERS",
+        allowed_group_chats_env="LINE_ALLOWED_GROUPS",
+        allowed_room_chats_env="LINE_ALLOWED_ROOMS",
+        chat_allowlist_authorization_config_key="authorize_allowed_chats",
         # LINE per-bubble cap is 5000; smart-chunker uses 4500.
         max_message_length=LINE_SAFE_BUBBLE_CHARS,
         emoji="💚",

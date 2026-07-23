@@ -297,31 +297,51 @@ class GatewayAuthorizationMixin:
 
         user_id = source.user_id
 
-        # Telegram (and similar) authorize entire group/forum/channel chats
-        # by chat ID via TELEGRAM_GROUP_ALLOWED_CHATS / QQ_GROUP_ALLOWED_USERS.
-        # That allowlist is chat-scoped, so it must work even when
-        # source.user_id is None — Telegram emits anonymous-admin posts,
-        # sender_chat traffic, and channel broadcasts with no `from_user`,
-        # and an operator who explicitly listed the chat expects those to
-        # be honored. Run this check before the no-user-id guard below so
-        # documented behavior matches reality
-        # (website/docs/reference/environment-variables.md,
-        # website/docs/user-guide/messaging/telegram.md).
-        if source.chat_type in {"group", "forum", "channel"} and source.chat_id:
+        # Plugin platforms can declare chat-scoped allowlists as part of the
+        # registry contract.  Resolve the entry before the no-user-id guard:
+        # a listed chat is an authorization grant in its own right, including
+        # for anonymous/system-originated group traffic.
+        plugin_entry = None
+        try:
+            from gateway.platform_registry import platform_registry
+            plugin_entry = platform_registry.get(source.platform.value)
+        except Exception:
+            pass
+
+        plugin_chat_allowlist_enabled = False
+        if plugin_entry and plugin_entry.chat_allowlist_authorization_config_key:
+            platform_config = getattr(self.config, "platforms", {}).get(source.platform)
+            if platform_config:
+                plugin_chat_allowlist_enabled = bool(
+                    platform_config.extra.get(
+                        plugin_entry.chat_allowlist_authorization_config_key,
+                        False,
+                    )
+                )
+
+        # Telegram and QQBot retain their built-in chat allowlists.  Plugins
+        # may opt into the same authorization model through PlatformEntry,
+        # while their profile must explicitly enable the sender-independent
+        # policy.
+        chat_allowlist_env = ""
+        if source.chat_type in {"group", "forum", "channel"}:
             chat_allowlist_env = {
                 Platform.TELEGRAM: "TELEGRAM_GROUP_ALLOWED_CHATS",
                 Platform.QQBOT: "QQ_GROUP_ALLOWED_USERS",
             }.get(source.platform, "")
-            if chat_allowlist_env:
-                raw_chat_allowlist = os.getenv(chat_allowlist_env, "").strip()
-                if raw_chat_allowlist:
-                    allowed_group_ids = {
-                        cid.strip()
-                        for cid in raw_chat_allowlist.split(",")
-                        if cid.strip()
-                    }
-                    if "*" in allowed_group_ids or source.chat_id in allowed_group_ids:
-                        return True
+            if not chat_allowlist_env and plugin_entry is not None and plugin_chat_allowlist_enabled:
+                chat_allowlist_env = plugin_entry.allowed_group_chats_env
+        elif source.chat_type == "room" and plugin_entry is not None and plugin_chat_allowlist_enabled:
+            chat_allowlist_env = plugin_entry.allowed_room_chats_env
+
+        if chat_allowlist_env and source.chat_id:
+            raw_chat_allowlist = os.getenv(chat_allowlist_env, "").strip()
+            if raw_chat_allowlist:
+                allowed_chat_ids = {
+                    cid.strip() for cid in raw_chat_allowlist.split(",") if cid.strip()
+                }
+                if "*" in allowed_chat_ids or source.chat_id in allowed_chat_ids:
+                    return True
 
         # Bots admitted by {PLATFORM}_ALLOW_BOTS bypass the human allowlist (#4466).
         # Checked before the no-user-id guard below: some platforms deliver

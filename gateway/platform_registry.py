@@ -88,6 +88,16 @@ class PlatformEntry:
     allowed_users_env: str = ""
     # E.g. "IRC_ALLOW_ALL_USERS" — if truthy, all users authorized.
     allow_all_env: str = ""
+    # E.g. "LINE_ALLOWED_GROUPS" — listed group chat IDs are authorized
+    # independently of the individual sender allowlist.
+    allowed_group_chats_env: str = ""
+    # E.g. "LINE_ALLOWED_ROOMS" — listed room chat IDs are authorized
+    # independently of the individual sender allowlist.
+    allowed_room_chats_env: str = ""
+    # Optional ``PlatformConfig.extra`` key that must be truthy before this
+    # plugin's group/room chat allowlists become sender-independent grants.
+    # Empty keeps the plugin on the normal sender-allowlist path.
+    chat_allowlist_authorization_config_key: str = ""
 
     # ── Message limits ──
     # Max message length for smart-chunking.  0 = no limit.
