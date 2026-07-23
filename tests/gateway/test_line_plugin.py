@@ -411,6 +411,29 @@ class TestRegister:
             "LINE_CHANNEL_SECRET",
         }
 
+    def test_register_wires_allowlist_envs(self):
+        ctx = self._FakeCtx()
+        register(ctx)
+        assert ctx.kwargs["allowed_users_env"] == "LINE_ALLOWED_USERS"
+        assert ctx.kwargs["allow_all_env"] == "LINE_ALLOW_ALL_USERS"
+        assert ctx.kwargs["allowed_group_chats_env"] == "LINE_ALLOWED_GROUPS"
+        assert ctx.kwargs["allowed_room_chats_env"] == "LINE_ALLOWED_ROOMS"
+        assert ctx.kwargs["chat_allowlist_authorization_config_key"] == "authorize_allowed_chats"
+
+    def test_register_wires_cron_home_channel(self):
+        ctx = self._FakeCtx()
+        register(ctx)
+        assert ctx.kwargs["cron_deliver_env_var"] == "LINE_HOME_CHANNEL"
+
+    def test_register_provides_standalone_sender(self):
+        ctx = self._FakeCtx()
+        register(ctx)
+        assert callable(ctx.kwargs["standalone_sender_fn"])
+
+    def test_register_provides_env_enablement(self):
+        ctx = self._FakeCtx()
+        register(ctx)
+        assert callable(ctx.kwargs["env_enablement_fn"])
 
     def test_register_factory_yields_line_adapter(self):
         ctx = self._FakeCtx()

@@ -83,6 +83,9 @@ gateway:
         - C1234567890abcdef...
       allowed_rooms:
         - R1234567890abcdef...
+      # Opt in to treating listed groups/rooms as shared chat-level grants.
+      # Without this, individual senders must still be in allowed_users.
+      authorize_allowed_chats: true
       # Applies only to groups and rooms; DMs remain available to allowlisted users.
       require_mention: true
 ```
@@ -101,6 +104,11 @@ LINE_REQUIRE_MENTION=true
 text against a display name. If enabled, an allowlisted group or room message is
 ignored unless it explicitly mentions the bot. When both are set, the corresponding
 `LINE_*` environment variable overrides the `config.yaml` value.
+
+Set `authorize_allowed_chats: true` only when a listed group or room is intended
+as a shared workspace: it authorizes that chat independently of
+`LINE_ALLOWED_USERS` / `allowed_users`. The default is `false`, so existing
+installations continue to require an allowed sender even within a listed chat.
 
 That's enough — the bundled-plugin scan in `gateway/config.py` automatically picks up `plugins/platforms/line/`. No `Platform.LINE` enum edit, no `_create_adapter` registration.
 
@@ -186,8 +194,8 @@ Cron jobs with `deliver: line` route to `LINE_HOME_CHANNEL`. The adapter ships a
 | `LINE_PORT` | no | `8646` | Webhook bind port |
 | `LINE_PUBLIC_URL` | for media | — | Public HTTPS base URL; required for image/voice/video sends |
 | `LINE_ALLOWED_USERS` | one of | — | Comma-separated user IDs (U-prefixed) for DMs |
-| `LINE_ALLOWED_GROUPS` | groups | — | Comma-separated group IDs (C-prefixed) |
-| `LINE_ALLOWED_ROOMS` | rooms | — | Comma-separated room IDs (R-prefixed) |
+| `LINE_ALLOWED_GROUPS` | groups | — | Comma-separated group IDs (C-prefixed); shared-chat grants require `authorize_allowed_chats: true` |
+| `LINE_ALLOWED_ROOMS` | rooms | — | Comma-separated room IDs (R-prefixed); shared-chat grants require `authorize_allowed_chats: true` |
 | `LINE_REQUIRE_MENTION` | no | `false` | Require an explicit bot @mention for group and room messages; DMs are unaffected |
 | `LINE_ALLOW_ALL_USERS` | dev only | `false` | Skip allowlist entirely |
 | `LINE_HOME_CHANNEL` | no | — | Default cron / notification delivery target |
