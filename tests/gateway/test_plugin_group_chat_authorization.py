@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from gateway.config import GatewayConfig, Platform, PlatformConfig
+from gateway.config import GatewayConfig, Platform, PlatformConfig, load_gateway_config
 from gateway.platform_registry import PlatformEntry, platform_registry
 from gateway.session import SessionSource
 
@@ -97,3 +97,36 @@ def test_plugin_room_allowlist_authorizes_unlisted_sender(monkeypatch):
     assert _runner_for(line, extra={"authorize_allowed_chats": True})._is_user_authorized(
         _source(line, chat_type="room", chat_id="R-family", user_id="U-someone-else")
     ) is True
+
+
+def test_plugin_chat_allowlist_opt_in_bridges_from_nested_yaml(monkeypatch, tmp_path):
+    """Registry-declared policy keys work from gateway.platforms config."""
+    hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    (hermes_home / "config.yaml").write_text(
+        "gateway:\n"
+        "  platforms:\n"
+        "    line:\n"
+        "      enabled: true\n"
+        "      authorize_allowed_chats: true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    line = _register_line(monkeypatch)
+
+    config = load_gateway_config()
+
+    assert config is not None
+    assert config.platforms[line].extra["authorize_allowed_chats"] is True
+
+
+def test_plugin_chat_allowlist_requires_literal_true(monkeypatch):
+    """Quoted or otherwise truthy config values must not widen authorization."""
+    monkeypatch.setenv("LINE_ALLOWED_USERS", "U-owner")
+    monkeypatch.setenv("LINE_ALLOWED_GROUPS", "C-family")
+    monkeypatch.delenv("GATEWAY_ALLOWED_USERS", raising=False)
+    line = _register_line(monkeypatch)
+
+    assert _runner_for(line, extra={"authorize_allowed_chats": "false"})._is_user_authorized(
+        _source(line, chat_type="group", chat_id="C-family", user_id="U-someone-else")
+    ) is False
