@@ -258,6 +258,152 @@ def test_require_mention_does_not_gate_direct_messages():
 
 
 # ---------------------------------------------------------------------------
+# Archive of unmentioned group/room messages
+# ---------------------------------------------------------------------------
+
+def _archive_adapter(archive_path, *, archive_unmentioned=True):
+    """Build a require_mention adapter wired to an explicit archive file."""
+    from gateway.config import PlatformConfig
+
+    cfg = PlatformConfig(
+        enabled=True,
+        extra={
+            "channel_access_token": "tok",
+            "channel_secret": "sec",
+            "allowed_users": ["Uok"],
+            "allowed_groups": ["Cok"],
+            "allowed_rooms": ["Rok"],
+            "require_mention": True,
+            "archive_unmentioned": archive_unmentioned,
+            "archive_path": str(archive_path),
+        },
+    )
+    adapter = LineAdapter(cfg)
+    adapter._bot_user_id = "Ubot"
+    adapter._handle_message_event = AsyncMock()
+    return adapter
+
+
+def _read_jsonl(path):
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def test_unmentioned_group_message_is_archived(tmp_path):
+    archive = tmp_path / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive)
+    event = {
+        "type": "message",
+        "source": {"type": "group", "groupId": "Cok", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "ordinary chatter"},
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    # Dropped from the agent path, but persisted.
+    adapter._handle_message_event.assert_not_awaited()
+    rows = _read_jsonl(archive)
+    assert len(rows) == 1
+    rec = rows[0]
+    assert rec["platform"] == "line"
+    assert rec["chat_type"] == "group"
+    assert rec["chat_id"] == "Cok"
+    assert rec["user_id"] == "Uok"
+    assert rec["message_id"] == "m1"
+    assert rec["msg_type"] == "text"
+    assert rec["text"] == "ordinary chatter"
+    assert "ts" in rec
+
+
+def test_unmentioned_room_sticker_is_archived_with_summary(tmp_path):
+    archive = tmp_path / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive)
+    event = {
+        "type": "message",
+        "source": {"type": "room", "roomId": "Rok", "userId": "Uok"},
+        "message": {"type": "sticker", "id": "s1", "keywords": ["cony", "love"]},
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    adapter._handle_message_event.assert_not_awaited()
+    rows = _read_jsonl(archive)
+    assert len(rows) == 1
+    assert rows[0]["chat_type"] == "room"
+    assert rows[0]["text"] == "[sticker: cony, love]"
+
+
+def test_mentioned_group_message_is_not_archived(tmp_path):
+    archive = tmp_path / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive)
+    event = {
+        "type": "message",
+        "source": {"type": "group", "groupId": "Cok", "userId": "Uok"},
+        "message": {
+            "type": "text",
+            "id": "m1",
+            "text": "@bot hello",
+            "mention": {"mentionees": [{"userId": "Ubot", "index": 0, "length": 4}]},
+        },
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    # Reaches the agent, and is NOT archived.
+    adapter._handle_message_event.assert_awaited_once_with(event)
+    assert _read_jsonl(archive) == []
+
+
+def test_direct_message_is_not_archived(tmp_path):
+    archive = tmp_path / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive)
+    event = {
+        "type": "message",
+        "source": {"type": "user", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "hi bot"},
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    adapter._handle_message_event.assert_awaited_once_with(event)
+    assert _read_jsonl(archive) == []
+
+
+def test_archive_disabled_writes_nothing(tmp_path):
+    archive = tmp_path / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive, archive_unmentioned=False)
+    event = {
+        "type": "message",
+        "source": {"type": "group", "groupId": "Cok", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "ordinary chatter"},
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    # Still gated out of the agent path, but nothing is written.
+    adapter._handle_message_event.assert_not_awaited()
+    assert _read_jsonl(archive) == []
+
+
+def test_archive_failure_never_breaks_dispatch(tmp_path):
+    # Point the archive at a path whose parent is a regular file -> mkdir fails.
+    blocker = tmp_path / "blocker"
+    blocker.write_text("x", encoding="utf-8")
+    archive = blocker / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive)
+    event = {
+        "type": "message",
+        "source": {"type": "group", "groupId": "Cok", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "ordinary chatter"},
+    }
+
+    # Must not raise despite the unwritable archive path.
+    asyncio.run(adapter._dispatch_event(event))
+    adapter._handle_message_event.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
 # 4. Inbound dedup
 # ---------------------------------------------------------------------------
 

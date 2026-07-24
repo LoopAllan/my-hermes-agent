@@ -450,6 +450,25 @@ def _message_mentions_user(message: Dict[str, Any], user_id: Optional[str]) -> b
     )
 
 
+def _message_text_summary(msg: Dict[str, Any]) -> str:
+    """Human-readable text for a LINE inbound message, independent of any media
+    download. Shared by the normal message handler and the unmentioned-archive
+    path so both describe messages identically."""
+    msg_type = (msg or {}).get("type", "")
+    if msg_type == "text":
+        return msg.get("text", "") or ""
+    if msg_type in {"image", "audio", "video", "file"}:
+        return f"[{msg_type}]"
+    if msg_type == "sticker":
+        keywords = msg.get("keywords") or []
+        return f"[sticker: {', '.join(keywords)}]" if keywords else "[sticker]"
+    if msg_type == "location":
+        title = msg.get("title", "")
+        address = msg.get("address", "")
+        return f"[location: {title} {address}]".strip()
+    return f"[unsupported message type: {msg_type}]"
+
+
 # ---------------------------------------------------------------------------
 # LINE Reply / Push HTTP client
 # ---------------------------------------------------------------------------
@@ -703,6 +722,13 @@ class LineAdapter(BasePlatformAdapter):
         self.require_mention = _truthy_env(
             "LINE_REQUIRE_MENTION", bool(extra.get("require_mention", False))
         )
+        # Archive group/room messages that arrive without an @mention (the ones
+        # require_mention drops). Off by default; path is optional and falls
+        # back to <hermes_home>/logs/line-unmentioned.jsonl. See archive.py.
+        self.archive_unmentioned = _truthy_env(
+            "LINE_ARCHIVE_UNMENTIONED", bool(extra.get("archive_unmentioned", False))
+        )
+        self.archive_path = os.getenv("LINE_ARCHIVE_PATH") or extra.get("archive_path") or None
 
         # Slow-LLM postback button threshold
         try:
@@ -942,6 +968,8 @@ class LineAdapter(BasePlatformAdapter):
             and not _message_mentions_user(event.get("message") or {}, self._bot_user_id)
         ):
             logger.debug("LINE: ignoring group/room message without bot mention")
+            if self.archive_unmentioned:
+                self._archive_unmentioned(event, source)
             return
 
         if event_type == "message":
@@ -952,6 +980,37 @@ class LineAdapter(BasePlatformAdapter):
             logger.info("LINE: lifecycle event %s from %s", event_type, source)
         else:
             logger.debug("LINE: ignoring event type %r", event_type)
+
+    def _archive_unmentioned(self, event: Dict[str, Any], source: Dict[str, Any]) -> None:
+        """Persist a group/room message that was dropped for lacking an @mention.
+
+        Best-effort: never raises, so it cannot disturb the inbound path.
+        """
+        try:
+            from datetime import datetime
+
+            # Relative import in production (package context); fall back to the
+            # absolute path when the module is loaded standalone (e.g. tests).
+            try:
+                from .archive import append_unmentioned_record
+            except ImportError:
+                from plugins.platforms.line.archive import append_unmentioned_record
+
+            msg = event.get("message") or {}
+            chat_id, chat_type = _resolve_chat(source)
+            record = {
+                "ts": datetime.now().astimezone().isoformat(),
+                "platform": "line",
+                "chat_type": chat_type,
+                "chat_id": chat_id,
+                "user_id": source.get("userId", ""),
+                "message_id": msg.get("id", ""),
+                "msg_type": msg.get("type", ""),
+                "text": _message_text_summary(msg),
+            }
+            append_unmentioned_record(record, path=self.archive_path)
+        except Exception as exc:  # noqa: BLE001 — archiving must not break handling
+            logger.warning("LINE: _archive_unmentioned failed: %s", exc)
 
     async def _handle_message_event(self, event: Dict[str, Any]) -> None:
         msg = event.get("message") or {}
@@ -973,25 +1032,15 @@ class LineAdapter(BasePlatformAdapter):
         # vision-tool-friendly local path on the MessageEvent.
         media_urls: List[str] = []
         media_types: List[str] = []
-        text = ""
+        text = _message_text_summary(msg)
 
-        if msg_type == "text":
-            text = msg.get("text", "") or ""
-        elif msg_type in {"image", "audio", "video", "file"}:
+        # Media types additionally need the binary fetched and cached; the text
+        # summary above already produced the ``[image]``-style placeholder.
+        if msg_type in {"image", "audio", "video", "file"}:
             local_path = await self._download_media(message_id, msg_type)
             if local_path:
                 media_urls.append(local_path)
                 media_types.append(msg_type)
-            text = f"[{msg_type}]"
-        elif msg_type == "sticker":
-            keywords = msg.get("keywords") or []
-            text = f"[sticker: {', '.join(keywords)}]" if keywords else "[sticker]"
-        elif msg_type == "location":
-            title = msg.get("title", "")
-            address = msg.get("address", "")
-            text = f"[location: {title} {address}]".strip()
-        else:
-            text = f"[unsupported message type: {msg_type}]"
 
         # Best-effort typing indicator (DM only).
         if chat_type == "dm" and self._client:
