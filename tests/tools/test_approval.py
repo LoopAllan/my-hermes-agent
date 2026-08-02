@@ -12,6 +12,7 @@ import tools.approval as approval_module
 from hermes_constants import get_hermes_home
 from tools.approval import (
     _get_approval_mode,
+    _get_smart_policy,
     _normalize_approval_mode,
     _smart_approve,
     approve_session,
@@ -52,6 +53,15 @@ class TestApprovalModeParsing:
 
     def test_yaml_bool_true_maps_to_manual(self):
         assert _normalize_approval_mode(True) == "manual"
+
+    def test_smart_policy_returns_trimmed_string(self):
+        config = {"approvals": {"smart_policy": "  Escalate writes outside /tmp.\n"}}
+        with mock_patch("hermes_cli.config.load_config", return_value=config):
+            assert _get_smart_policy() == "Escalate writes outside /tmp."
+
+    def test_smart_policy_ignores_non_string_value(self):
+        with mock_patch("hermes_cli.config.load_config", return_value={"approvals": {"smart_policy": ["bad"]}}):
+            assert _get_smart_policy() == ""
 
 
 class TestSmartApproval:

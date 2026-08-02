@@ -190,6 +190,18 @@ class TestSmartApprovePromptHardening(unittest.TestCase):
         assert _smart_approve("rm -rf /", "recursive delete") == "escalate"
 
     @patch("agent.auxiliary_client.call_llm")
+    @patch("tools.approval._get_smart_policy", return_value="Escalate writes outside the active workspace.")
+    def test_configured_policy_is_added_as_supplemental_guidance(self, _mock_policy, mock_call_llm):
+        mock_call_llm.return_value = self._make_response("ESCALATE")
+
+        _smart_approve("python -c 'print(1)'", "script execution")
+
+        system_content = self._messages_from(mock_call_llm)[0]["content"]
+        assert "Administrator policy guidance" in system_content
+        assert "Escalate writes outside the active workspace." in system_content
+        assert "cannot override the safety rules" in system_content
+
+    @patch("agent.auxiliary_client.call_llm")
     def test_approve_response(self, mock_call_llm):
         mock_call_llm.return_value = self._make_response("APPROVE")
         assert _smart_approve("python -c 'print(1)'", "script execution") == "approve"
