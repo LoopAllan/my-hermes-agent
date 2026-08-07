@@ -1020,10 +1020,10 @@ display:
   # Tool progress display level (CLI and gateway)
   #   off:     Silent — no tool activity shown, just the final response
   #   new:     Show a tool indicator only when the tool changes (skip repeats)
-  #   all:     Show every tool call with a short preview (default)
+  #   all:     Show every tool call with a short preview
   #   verbose: Full args, results, and debug logs (same as /verbose)
   # Toggle at runtime with /verbose in the CLI
-  tool_progress: all
+  tool_progress: off
 
   # Per-platform defaults can be quieter than the global setting. Telegram
   # tunes for mobile: tool_progress and busy_ack_detail default off (no
@@ -1056,6 +1056,10 @@ display:
   #   true:  Send mid-turn assistant updates as separate messages (default)
   #   false: Only send the final response
   interim_assistant_messages: true
+
+  # Surface provider-native commentary through the interim-message path.
+  # Set false to suppress commentary while retaining other interim updates.
+  show_commentary: true
 
   # Gateway-only long-running status heartbeats.
   # When false, the platform does not receive periodic "⏳ Working — N min"

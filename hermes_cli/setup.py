@@ -1476,7 +1476,7 @@ def _apply_default_agent_settings(config: dict):
     # 60-vs-500 bug (stale .env entry silently shadowing config.yaml).
     remove_env_value("HERMES_MAX_ITERATIONS")
 
-    config.setdefault("display", {})["tool_progress"] = "all"
+    config.setdefault("display", {})["tool_progress"] = "off"
 
     config.setdefault("compression", {})["enabled"] = True
     config["compression"]["threshold"] = 0.50
@@ -1489,7 +1489,7 @@ def _apply_default_agent_settings(config: dict):
     save_config(config)
     print_success("Applied recommended defaults:")
     print_info("  Max iterations: 150")
-    print_info("  Tool progress: all")
+    print_info("  Tool progress: off")
     print_info("  Compression threshold: 0.50")
     print_info("  Session reset: never (use /reset or compression)")
     print_info("  Run `hermes setup agent` later to customize.")
@@ -1537,7 +1537,7 @@ def setup_agent_settings(config: dict):
     print_info("  all     — Show every tool call with a short preview")
     print_info("  verbose — Full args, results, and debug logs")
 
-    current_mode = cfg_get(config, "display", "tool_progress", default="all")
+    current_mode = cfg_get(config, "display", "tool_progress", default="off")
     mode = prompt("Tool progress mode", current_mode)
     if mode.lower() in {"off", "new", "all", "verbose"}:
         if "display" not in config:
@@ -3083,7 +3083,7 @@ def _blank_slate_minimize_config(config: dict):
     config.setdefault("session_reset", {})["mode"] = "none"
 
     # Quiet, minimal display.
-    config.setdefault("display", {})["tool_progress"] = "all"
+    config.setdefault("display", {})["tool_progress"] = "off"
 
 
 def _run_blank_slate_setup(config: dict, hermes_home, is_existing: bool):

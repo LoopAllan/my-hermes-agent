@@ -99,7 +99,9 @@ class TestLoadConfigDefaults:
             assert "max_turns" not in config
             assert "terminal" in config
             assert config["terminal"]["backend"] == "local"
+            assert config["display"]["tool_progress"] == "off"
             assert config["display"]["interim_assistant_messages"] is True
+            assert config["display"]["show_commentary"] is True
             assert config["dashboard"]["show_token_analytics"] is True
 
     def test_legacy_root_level_max_turns_migrates_to_agent_config(self, tmp_path):
@@ -1092,7 +1094,9 @@ class TestInterimAssistantMessageConfig:
     """Test the explicit gateway interim-message config gate."""
 
     def test_default_config_enables_interim_assistant_messages(self):
+        assert DEFAULT_CONFIG["display"]["tool_progress"] == "off"
         assert DEFAULT_CONFIG["display"]["interim_assistant_messages"] is True
+        assert DEFAULT_CONFIG["display"]["show_commentary"] is True
 
     def test_migrate_to_v15_adds_interim_assistant_message_gate(self, tmp_path):
         config_path = tmp_path / "config.yaml"

@@ -1738,7 +1738,13 @@ DEFAULT_CONFIG = {
             "first_lines": 2,
             "last_lines": 2,
         },
-        "interim_assistant_messages": True,  # Gateway: show natural mid-turn assistant status messages
+        # Keep gateway tool execution quiet by default. Profiles can opt into
+        # "new", "all", or "verbose" when a breadcrumb trail is useful.
+        "tool_progress": "off",
+        # Gateway: show natural mid-turn assistant status messages.
+        "interim_assistant_messages": True,
+        # Surface provider-native commentary through the interim-message path.
+        "show_commentary": True,
         "tool_progress_command": False,  # Enable /verbose command in messaging gateway
         "tool_progress_overrides": {},  # DEPRECATED — use display.platforms instead
         "tool_preview_length": 0,  # Max chars for tool call previews (0 = no limit, show full paths/commands)

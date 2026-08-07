@@ -15998,6 +15998,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 require_platform_override_for={Platform.MATTERMOST},
             )
         )
+        # Commentary is a subset of interim assistant output. Keep its own
+        # display control so profiles can silence provider-native status text
+        # without disabling other interim assistant messages.
+        show_commentary = _resolve_gateway_display_bool(
+            user_config,
+            platform_key,
+            "show_commentary",
+            default=True,
+            platform=source.platform,
+            require_platform_override_for={Platform.MATTERMOST},
+        )
         # thinking_progress is independent — if enabled, we need the progress
         # queue even when tool_progress is off (thinking relay uses same infra).
         # Mattermost requires a per-platform opt-in: global scratch-text display
@@ -16828,7 +16839,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 else bool(_plat_streaming)
             )
             _want_stream_deltas = _streaming_enabled
-            _want_interim_messages = interim_assistant_messages_enabled
+            _want_interim_messages = interim_assistant_messages_enabled and show_commentary
             _want_interim_consumer = _want_interim_messages
             if _want_stream_deltas or _want_interim_consumer:
                 try:

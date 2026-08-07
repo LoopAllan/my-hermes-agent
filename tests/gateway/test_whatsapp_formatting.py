@@ -356,6 +356,6 @@ class TestWhatsAppTier:
         # TIER_MEDIUM has streaming: None (follow global), not False
         assert resolve_display_setting({}, "whatsapp", "streaming") is None
 
-    def test_whatsapp_tool_progress_is_new(self):
+    def test_whatsapp_tool_progress_is_off(self):
         from gateway.display_config import resolve_display_setting
-        assert resolve_display_setting({}, "whatsapp", "tool_progress") == "new"
+        assert resolve_display_setting({}, "whatsapp", "tool_progress") == "off"

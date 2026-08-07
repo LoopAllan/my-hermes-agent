@@ -31,7 +31,7 @@ from typing import Any
 # and don't participate in per-platform resolution.
 
 _GLOBAL_DEFAULTS: dict[str, Any] = {
-    "tool_progress": "all",
+    "tool_progress": "off",
     "tool_progress_grouping": "accumulate",  # "accumulate" = edit one bubble; "separate" = one msg per tool
     "show_reasoning": False,
     # How a reasoning/thinking summary is rendered when show_reasoning is on.
@@ -45,6 +45,7 @@ _GLOBAL_DEFAULTS: dict[str, Any] = {
     # Gateway-only assistant/status chatter controls. These default on for
     # back-compat, but mobile platforms can opt down to final-answer-first.
     "interim_assistant_messages": True,
+    "show_commentary": True,
     "long_running_notifications": True,
     "busy_ack_detail": True,
     # When true, delete tool-progress / "⏳ Working — N min" / status bubbles
@@ -64,7 +65,7 @@ _GLOBAL_DEFAULTS: dict[str, Any] = {
 # Tier 4 (minimal): Batch/non-interactive delivery
 
 _TIER_HIGH = {
-    "tool_progress": "all",
+    "tool_progress": "off",
     "show_reasoning": False,
     "tool_preview_length": 40,
     "streaming": None,  # follow global
@@ -74,7 +75,7 @@ _TIER_HIGH = {
 }
 
 _TIER_MEDIUM = {
-    "tool_progress": "new",
+    "tool_progress": "off",
     "show_reasoning": False,
     "tool_preview_length": 40,
     "streaming": None,
@@ -238,6 +239,7 @@ def _normalise(setting: str, value: Any) -> Any:
         "show_reasoning",
         "streaming",
         "interim_assistant_messages",
+        "show_commentary",
         "long_running_notifications",
         "busy_ack_detail",
     }:

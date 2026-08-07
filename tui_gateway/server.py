@@ -2375,13 +2375,13 @@ def _load_tool_progress_mode() -> str:
     env = os.environ.get("HERMES_TUI_TOOL_PROGRESS", "").strip().lower()
     if env in {"off", "new", "all", "verbose"}:
         return env
-    raw = (_load_cfg().get("display") or {}).get("tool_progress", "all")
+    raw = (_load_cfg().get("display") or {}).get("tool_progress", "off")
     if raw is False:
         return "off"
     if raw is True:
         return "all"
-    mode = str(raw or "all").strip().lower()
-    return mode if mode in {"off", "new", "all", "verbose"} else "all"
+    mode = str(raw or "off").strip().lower()
+    return mode if mode in {"off", "new", "all", "verbose"} else "off"
 
 
 def _load_enabled_toolsets() -> list[str] | None:

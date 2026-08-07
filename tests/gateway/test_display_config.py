@@ -51,8 +51,8 @@ class TestResolveDisplaySetting:
         from gateway.display_config import resolve_display_setting
 
         config = {}
-        # Unknown platform, no config → global default "all"
-        assert resolve_display_setting(config, "unknown_platform", "tool_progress") == "all"
+        # Unknown platform, no config → global default "off"
+        assert resolve_display_setting(config, "unknown_platform", "tool_progress") == "off"
 
     def test_fallback_parameter_used_last(self):
         """Explicit fallback is used when nothing else matches."""
@@ -178,21 +178,12 @@ class TestYAMLNormalisation:
 class TestPlatformDefaults:
     """Built-in defaults reflect platform capability tiers."""
 
-    def test_high_tier_platforms(self):
-        """Discord defaults to 'all'; Telegram defaults quiet for mobile."""
+    def test_all_interactive_platforms_default_to_quiet_tool_progress(self):
+        """All platforms default to quiet tool progress for every profile."""
         from gateway.display_config import resolve_display_setting
 
-        # Telegram: tier_high transport, but quiet mobile default.
-        assert resolve_display_setting({}, "telegram", "tool_progress") == "off"
-        # Discord: pure tier_high.
-        assert resolve_display_setting({}, "discord", "tool_progress") == "all"
-
-    def test_medium_tier_platforms(self):
-        """Mattermost, Matrix, Feishu, WhatsApp default to 'new' tool progress."""
-        from gateway.display_config import resolve_display_setting
-
-        for plat in ("mattermost", "matrix", "feishu", "whatsapp"):
-            assert resolve_display_setting({}, plat, "tool_progress") == "new", plat
+        for plat in ("telegram", "discord", "mattermost", "matrix", "feishu", "whatsapp"):
+            assert resolve_display_setting({}, plat, "tool_progress") == "off", plat
 
     def test_slack_defaults_tool_progress_off(self):
         """Slack defaults to quiet tool progress (permanent chat noise otherwise)."""
@@ -249,6 +240,7 @@ class TestPlatformDefaults:
         # Real model voice — keep on. Without this, Telegram users see
         # "typing..." for the entire turn duration with no feedback.
         assert resolve_display_setting({}, "telegram", "interim_assistant_messages") is True
+        assert resolve_display_setting({}, "telegram", "show_commentary") is True
         # Periodic "Working — N min" heartbeat — keep on. Otherwise long
         # turns appear completely silent.
         assert resolve_display_setting({}, "telegram", "long_running_notifications") is True
@@ -258,6 +250,7 @@ class TestPlatformDefaults:
         assert resolve_display_setting({}, "telegram", "busy_ack_detail") is False
         # Discord keeps all of these on (desktop-first, more vertical space).
         assert resolve_display_setting({}, "discord", "interim_assistant_messages") is True
+        assert resolve_display_setting({}, "discord", "show_commentary") is True
         assert resolve_display_setting({}, "discord", "long_running_notifications") is True
         assert resolve_display_setting({}, "discord", "busy_ack_detail") is True
 
