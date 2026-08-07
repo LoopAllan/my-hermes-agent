@@ -1179,12 +1179,17 @@ class TestDiscordChannelPromptsConfig:
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
             migrate_config(interactive=False, quiet=True)
             raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            loaded = load_config()
 
         # custom_providers migrated to providers dict (by design, v11->v12)
         assert "custom_providers" not in raw
         assert "providers" in raw
         assert "local-llm" in raw["providers"]
         assert raw["providers"]["local-llm"]["api"] == "http://localhost:8080/v1"
+        # New defaults are intentionally not materialized during migration, but
+        # the legacy profile must resolve to the quiet default at load time.
+        assert "display" not in raw
+        assert loaded["display"]["tool_progress"] == "off"
 
         # File must NOT be a defaults dump — assert specific DEFAULT_CONFIG
         # top-level keys are absent (they should only appear via load_config's

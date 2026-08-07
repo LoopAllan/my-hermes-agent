@@ -197,6 +197,7 @@ class TestPlatformDefaults:
 
         for plat in ("signal", "bluebubbles", "weixin", "wecom", "dingtalk", "whatsapp_cloud"):
             assert resolve_display_setting({}, plat, "tool_progress") == "off", plat
+            assert resolve_display_setting({}, plat, "interim_assistant_messages") is True, plat
 
     def test_whatsapp_cloud_locked_to_low_tier_until_edit_message_lands(self):
         """Regression guard: ``whatsapp_cloud`` must stay TIER_LOW until the
@@ -218,6 +219,7 @@ class TestPlatformDefaults:
 
         for plat in ("email", "sms", "webhook", "homeassistant"):
             assert resolve_display_setting({}, plat, "tool_progress") == "off", plat
+            assert resolve_display_setting({}, plat, "interim_assistant_messages") is True, plat
 
     def test_low_tier_streaming_defaults_to_false(self):
         """Low-tier platforms default streaming to False."""

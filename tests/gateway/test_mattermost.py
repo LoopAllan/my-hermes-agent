@@ -36,6 +36,18 @@ class TestMattermostProgressThreadRouting:
 
 
 class TestMattermostDisplayHygiene:
+    def test_mattermost_uses_global_interim_display_default(self):
+        """The global profile default applies to Mattermost too."""
+        user_config = {"display": {"interim_assistant_messages": True}}
+
+        assert _resolve_gateway_display_bool(
+            user_config,
+            "mattermost",
+            "interim_assistant_messages",
+            default=True,
+            platform=Platform.MATTERMOST,
+        ) is True
+
     def test_mattermost_requires_platform_opt_in_for_interim_assistant_messages(self):
         """Global interim commentary must not make Mattermost leak scratch notes."""
         user_config = {"display": {"interim_assistant_messages": True}}

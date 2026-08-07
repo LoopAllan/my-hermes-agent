@@ -15995,7 +15995,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 "interim_assistant_messages",
                 default=True,
                 platform=source.platform,
-                require_platform_override_for={Platform.MATTERMOST},
             )
         )
         # Commentary is a subset of interim assistant output. Keep its own
@@ -16007,7 +16006,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             "show_commentary",
             default=True,
             platform=source.platform,
-            require_platform_override_for={Platform.MATTERMOST},
         )
         # thinking_progress is independent — if enabled, we need the progress
         # queue even when tool_progress is off (thinking relay uses same infra).

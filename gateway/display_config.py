@@ -89,7 +89,7 @@ _TIER_LOW = {
     "show_reasoning": False,
     "tool_preview_length": 40,
     "streaming": False,
-    "interim_assistant_messages": False,
+    "interim_assistant_messages": True,
     "long_running_notifications": False,
     "busy_ack_detail": False,
 }
@@ -99,7 +99,7 @@ _TIER_MINIMAL = {
     "show_reasoning": False,
     "tool_preview_length": 0,
     "streaming": False,
-    "interim_assistant_messages": False,
+    "interim_assistant_messages": True,
     "long_running_notifications": False,
     "busy_ack_detail": False,
 }

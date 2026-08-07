@@ -1413,11 +1413,12 @@ This controls both the `text_to_speech` tool and spoken replies in voice mode (`
 
 ```yaml
 display:
-  tool_progress: all      # off | new | all | verbose
+  tool_progress: off      # off | new | all | verbose
   tool_progress_command: false  # Enable /verbose slash command in messaging gateway
   platforms: {}           # Per-platform display overrides (see below)
   tool_progress_overrides: {}  # DEPRECATED — use display.platforms instead
   interim_assistant_messages: true  # Gateway: send natural mid-turn assistant updates as separate messages
+  show_commentary: true   # Gateway: surface provider-native commentary through interim messages
   skin: default           # Built-in or custom CLI skin (see user-guide/features/skins)
   personality: "kawaii"  # Legacy cosmetic field still surfaced in some summaries
   compact: false          # Compact output mode (less whitespace)
@@ -1468,7 +1469,7 @@ display:
 |------|-------------|
 | `off` | Silent — just the final response |
 | `new` | Tool indicator only when the tool changes |
-| `all` | Every tool call with a short preview (default) |
+| `all` | Every tool call with a short preview |
 | `verbose` | Full args, results, and debug logs |
 
 In the CLI, cycle through these modes with `/verbose`. To use `/verbose` in messaging platforms (Telegram, Discord, Slack, etc.), set `tool_progress_command: true` in the `display` section above. The command will then cycle the mode and save to config.
@@ -1502,7 +1503,7 @@ Different platforms have different verbosity needs. Use `display.platforms` to s
 
 ```yaml
 display:
-  tool_progress: all          # global default
+  tool_progress: off          # global default
   platforms:
     signal:
       tool_progress: 'off'    # Signal cannot currently display tool-progress bubbles

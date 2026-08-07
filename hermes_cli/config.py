@@ -5109,8 +5109,8 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                 display["tool_progress"] = old_mode.lower()
                 results["config_added"].append(f"display.tool_progress={old_mode.lower()} (from HERMES_TOOL_PROGRESS_MODE)")
             else:
-                display["tool_progress"] = "all"
-                results["config_added"].append("display.tool_progress=all (default)")
+                display["tool_progress"] = "off"
+                results["config_added"].append("display.tool_progress=off (default)")
             config["display"] = display
             _persist_migration(config)
             if not quiet:
