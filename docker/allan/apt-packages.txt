@@ -1,0 +1,3 @@
+# Keep this list small and deterministic. Add one Debian package per line.
+# Rebuild `allan-hermes-agent` after changing this file.
+jq
