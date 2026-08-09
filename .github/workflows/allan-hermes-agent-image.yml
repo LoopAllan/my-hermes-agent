@@ -7,6 +7,12 @@ on:
       - Dockerfile.allan
       - docker/allan/**
       - .github/workflows/allan-hermes-agent-image.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - Dockerfile.allan
+      - docker/allan/**
+      - .github/workflows/allan-hermes-agent-image.yml
   workflow_dispatch:
 
 permissions:
@@ -22,6 +28,7 @@ env:
 
 jobs:
   publish:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
