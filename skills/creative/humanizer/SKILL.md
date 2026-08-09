@@ -1,33 +1,17 @@
 ---
-title: "Humanizer — Humanize text: strip AI-isms and add real voice"
-sidebar_label: "Humanizer"
-description: "Humanize text: strip AI-isms and add real voice"
+name: humanizer
+description: "Humanize text: strip AI-isms and add real voice."
+version: 2.5.1
+author: Siqi Chen (@blader, https://github.com/blader/humanizer), ported by Hermes Agent
+license: MIT
+platforms: [linux, macos, windows]
+metadata:
+  hermes:
+    tags: [writing, editing, humanize, anti-ai-slop, voice, prose, text]
+    category: creative
+    homepage: https://github.com/blader/humanizer
+    related_skills: [songwriting-and-ai-music]
 ---
-
-{/* This page is auto-generated from the skill's SKILL.md by website/scripts/generate-skill-docs.py. Edit the source SKILL.md, not this page. */}
-
-# Humanizer
-
-Humanize text: strip AI-isms and add real voice.
-
-## Skill metadata
-
-| | |
-|---|---|
-| Source | Bundled (installed by default) |
-| Path | `skills/creative/humanizer` |
-| Version | `2.5.1` |
-| Author | Siqi Chen (@blader, https://github.com/blader/humanizer), ported by Hermes Agent |
-| License | MIT |
-| Platforms | linux, macos, windows |
-| Tags | `writing`, `editing`, `humanize`, `anti-ai-slop`, `voice`, `prose`, `text` |
-| Related skills | `songwriting-and-ai-music` |
-
-## Reference: full SKILL.md
-
-:::info
-The following is the complete skill definition that Hermes loads when this skill is triggered. This is what the agent sees as instructions when the skill is active.
-:::
 
 # Humanizer: Remove AI Writing Patterns
 

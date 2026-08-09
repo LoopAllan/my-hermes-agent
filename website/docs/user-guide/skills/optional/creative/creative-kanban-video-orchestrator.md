@@ -21,7 +21,7 @@ Plan, set up, and monitor a multi-agent video production pipeline backed by Herm
 | License | MIT |
 | Platforms | linux, macos, windows |
 | Tags | `video`, `kanban`, `multi-agent`, `orchestration`, `production-pipeline` |
-| Related skills | `ascii-video`, `manim-video`, `p5js`, `comfyui`, `touchdesigner-mcp`, [`blender-mcp`](/docs/user-guide/skills/optional/creative/creative-blender-mcp), [`pixel-art`](/docs/user-guide/skills/optional/creative/creative-pixel-art), `ascii-art`, `songwriting-and-ai-music`, `heartmula`, `songsee`, `spotify`, `youtube-content`, `claude-design`, `excalidraw`, `architecture-diagram`, [`concept-diagrams`](/docs/user-guide/skills/optional/creative/creative-concept-diagrams), [`baoyu-comic`](/docs/user-guide/skills/optional/creative/creative-baoyu-comic), `baoyu-infographic`, `humanizer`, `gif-search`, [`meme-generation`](/docs/user-guide/skills/optional/creative/creative-meme-generation) |
+| Related skills | `ascii-video`, `manim-video`, `p5js`, `comfyui`, `touchdesigner-mcp`, [`blender-mcp`](/docs/user-guide/skills/optional/creative/creative-blender-mcp), [`pixel-art`](/docs/user-guide/skills/optional/creative/creative-pixel-art), `ascii-art`, `songwriting-and-ai-music`, `heartmula`, `songsee`, `spotify`, `youtube-content`, `claude-design`, `excalidraw`, `architecture-diagram`, [`concept-diagrams`](/docs/user-guide/skills/optional/creative/creative-concept-diagrams), [`baoyu-comic`](/docs/user-guide/skills/optional/creative/creative-baoyu-comic), `baoyu-infographic`, [`humanizer`](/docs/user-guide/skills/bundled/creative/creative-humanizer), `gif-search`, [`meme-generation`](/docs/user-guide/skills/optional/creative/creative-meme-generation) |
 
 ## Reference: full SKILL.md
 

@@ -156,6 +156,15 @@ const sidebars: SidebarsConfig = {
                 },
                 {
                   type: 'category',
+                  label: 'creative',
+                  key: 'skills-bundled-creative',
+                  collapsed: true,
+                  items: [
+                    'user-guide/skills/bundled/creative/creative-humanizer',
+                  ],
+                },
+                {
+                  type: 'category',
                   label: 'github',
                   key: 'skills-bundled-github',
                   collapsed: true,
