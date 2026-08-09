@@ -1,0 +1,15 @@
+# syntax=docker/dockerfile:1.7
+# Allan-specific extension image. The upstream-compatible Hermes image remains
+# unchanged; customize this package list instead of mutating Hermes core.
+ARG BASE_IMAGE=ghcr.io/loopallan/my-hermes-agent:207e8c085df343e8be26767db3531415260d91b6
+FROM ${BASE_IMAGE}
+
+USER root
+COPY docker/allan/apt-packages.txt /tmp/allan-apt-packages.txt
+RUN set -eux; \
+    apt-get update; \
+    xargs --arg-file=/tmp/allan-apt-packages.txt --no-run-if-empty \
+      apt-get install --yes --no-install-recommends; \
+    rm -rf /var/lib/apt/lists/* /tmp/allan-apt-packages.txt
+
+USER hermes
