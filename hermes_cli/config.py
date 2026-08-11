@@ -2182,6 +2182,14 @@ DEFAULT_CONFIG = {
     # always goes to ~/.hermes/skills/.
     "skills": {
         "external_dirs": [],   # e.g. ["~/.agents/skills", "/shared/team-skills"]
+        # Optional in-process fast-forward updater for one trusted external Git checkout.
+        "marketplace": {
+            "enabled": False,
+            "repo_dir": "",
+            "remote": "origin",
+            "branch": "main",
+            "interval_seconds": 300,
+        },
         # Substitute ${HERMES_SKILL_DIR} and ${HERMES_SESSION_ID} in SKILL.md
         # content with the absolute skill directory and the active session id
         # before the agent sees it.  Lets skill authors reference bundled
