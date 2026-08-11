@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Allan-specific extension image. The upstream-compatible Hermes image remains
 # unchanged; customize this package list instead of mutating Hermes core.
-ARG BASE_IMAGE=ghcr.io/loopallan/my-hermes-agent@sha256:f5c6d473458f6a73849af56a3e761fb17c853f1fb604aadbdf2b5f1875364a38
+ARG BASE_IMAGE=ghcr.io/loopallan/my-hermes-agent:main
 FROM ${BASE_IMAGE}
 
 USER root
