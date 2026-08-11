@@ -3,16 +3,6 @@ name: Build Allan Hermes Agent Image
 on:
   push:
     branches: [main]
-    paths:
-      - Dockerfile.allan
-      - docker/allan/**
-      - .github/workflows/allan-hermes-agent-image.yml
-  pull_request:
-    branches: [main]
-    paths:
-      - Dockerfile.allan
-      - docker/allan/**
-      - .github/workflows/allan-hermes-agent-image.yml
   workflow_dispatch:
 
 permissions:
