@@ -9706,6 +9706,27 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         )
         self._update_runtime_status("running")
 
+    async def _marketplace_skills_watcher(self) -> None:
+        """Fast-forward a trusted external marketplace and rescan skills."""
+        from gateway.marketplace_updater import marketplace_config, update_marketplace_worktree
+        settings = marketplace_config(self.config)
+        if not settings:
+            return
+        interval = settings["interval_seconds"]
+        loop = asyncio.get_running_loop()
+        while self._running:
+            try:
+                changed = await loop.run_in_executor(None, update_marketplace_worktree, self.config)
+                if changed:
+                    from agent.skill_commands import reload_skills
+                    await loop.run_in_executor(None, reload_skills)
+                    logger.info("marketplace skills reloaded after fast-forward")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("marketplace skills watcher failed")
+            await asyncio.sleep(interval)
+
     async def _drain_control_watcher(self, interval: float = 1.0) -> None:
         """Background task: reconcile gateway accept-state with the drain marker.
 
@@ -14043,6 +14064,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # Stall watchdog: pending inbound + stale agent activity → warn user
         # to /new (does not kill the turn; see agent.session_stall_timeout).
         self._spawn_supervised(self._session_stall_watcher, "session_stall_watcher")
+
+        # Marketplace updates are opt-in; the watcher returns immediately when
+        # skills.marketplace is disabled. Routed through _spawn_supervised so
+        # shutdown cancels it and an outer-loop crash is logged and restarted.
+        self._spawn_supervised(self._marketplace_skills_watcher, "marketplace_skills_watcher")
 
         # Start background kanban notifier — each gateway delivers events for
         # subscriptions owned by the profiles whose adapters it hosts, even

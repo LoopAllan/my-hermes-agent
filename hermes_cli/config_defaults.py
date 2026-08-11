@@ -2228,6 +2228,14 @@ DEFAULT_CONFIG = {
     # always goes to ~/.hermes/skills/.
     "skills": {
         "external_dirs": [],   # e.g. ["~/.agents/skills", "/shared/team-skills"]
+        # Optional in-process fast-forward updater for one trusted external Git checkout.
+        "marketplace": {
+            "enabled": False,
+            "repo_dir": "",
+            "remote": "origin",
+            "branch": "main",
+            "interval_seconds": 300,
+        },
         # Project-local skill discovery: when a session starts inside a git
         # checkout, ``<root>/.hermes/skills/`` and ``<root>/.agents/skills/``
         # are sourced as the highest-precedence skill tier — but ONLY when the
