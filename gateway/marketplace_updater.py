@@ -25,8 +25,17 @@ def marketplace_config(config: dict[str, Any]) -> dict[str, Any] | None:
     except (TypeError, ValueError):
         logger.warning("marketplace sync interval_seconds must be an integer")
         return None
-    return {"repo_dir": repo_dir, "remote": str(settings.get("remote") or "origin"),
-            "branch": str(settings.get("branch") or "main"), "interval_seconds": interval}
+    remote = str(settings.get("remote") or "origin").strip()
+    branch = str(settings.get("branch") or "main").strip()
+    if not remote or not branch or remote.startswith("-") or branch.startswith("-"):
+        logger.warning("marketplace sync remote and branch must be non-option names")
+        return None
+    return {
+        "repo_dir": repo_dir,
+        "remote": remote,
+        "branch": branch,
+        "interval_seconds": interval,
+    }
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -35,6 +44,22 @@ def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(["git", "-C", str(repo), *args], text=True, capture_output=True,
                             timeout=30, check=True, env=env)
     return result.stdout.strip()
+
+
+def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    result = subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--is-ancestor", ancestor, descendant],
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+        env=env,
+    )
+    if result.returncode not in (0, 1):
+        raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+    return result.returncode == 0
 
 
 def _fetch(repo: Path, remote: str, branch: str) -> None:
@@ -74,11 +99,11 @@ def update_marketplace_worktree(config: dict[str, Any]) -> bool:
         current = _git(repo, "rev-parse", "HEAD")
         if target == current:
             return False
-        if _git(repo, "merge-base", "--is-ancestor", current, target) is not None:
+        if _is_ancestor(repo, current, target):
             _git(repo, "merge", "--ff-only", target)
             logger.info("marketplace advanced to %s", target)
             return True
         logger.warning("marketplace checkout diverged; refusing update")
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         logger.warning("marketplace update failed: %s", exc)
     return False
