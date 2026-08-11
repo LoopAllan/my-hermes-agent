@@ -69,6 +69,9 @@ def _make_runner():
     runner._pending_approvals = {}
     runner._honcho_managers = {}
     runner._honcho_configs = {}
+    # start() owns tracked background work, including the opt-in marketplace
+    # watcher; mirror the constructor state this focused fixture bypasses.
+    runner._background_tasks = set()
     runner._shutdown_all_gateway_honcho = lambda: None
     runner.session_store = MagicMock()
     return runner
