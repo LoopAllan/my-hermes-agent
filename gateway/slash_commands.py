@@ -5950,6 +5950,27 @@ class GatewaySlashCommandsMixin:
             handler=_on_confirm,
         )
 
+    async def _reload_skills_runtime(self) -> dict:
+        """Rescan skills and refresh platform-side skill caches."""
+        loop = asyncio.get_running_loop()
+        from agent.skill_commands import reload_skills
+
+        result = await loop.run_in_executor(None, reload_skills)
+        for adapter in list(self.adapters.values()):
+            refresh = getattr(adapter, "refresh_skill_group", None)
+            if not callable(refresh):
+                continue
+            try:
+                maybe = refresh()
+                if inspect.isawaitable(maybe):
+                    await maybe
+            except Exception as exc:
+                logger.warning(
+                    "Adapter %s refresh_skill_group raised: %s",
+                    getattr(adapter, "name", adapter), exc,
+                )
+        return result
+
     async def _handle_reload_skills_command(self, event: MessageEvent) -> str:
         """Handle /reload-skills — rescan skills dir, queue a note for next turn.
 
@@ -5965,36 +5986,11 @@ class GatewaySlashCommandsMixin:
         is written to the session transcript out-of-band, so message
         alternation is preserved.
         """
-        loop = asyncio.get_running_loop()
         try:
-            from agent.skill_commands import reload_skills
-
-            result = await loop.run_in_executor(None, reload_skills)
+            result = await self._reload_skills_runtime()
             added = result.get("added", [])      # [{"name", "description"}, ...]
             removed = result.get("removed", [])  # [{"name", "description"}, ...]
             total = result.get("total", 0)
-
-            # Let each connected adapter refresh any platform-side state
-            # that cached the skill list at startup. Today that's the
-            # Discord /skill autocomplete (registered once per connect);
-            # without this call, new skills stay invisible in the
-            # dropdown and deleted skills error out when clicked. Other
-            # adapters that don't override refresh_skill_group (Telegram's
-            # BotCommand menu, Slack subcommand map, etc.) are silently
-            # skipped — the in-process reload above is enough for them.
-            for adapter in list(self.adapters.values()):
-                refresh = getattr(adapter, "refresh_skill_group", None)
-                if not callable(refresh):
-                    continue
-                try:
-                    maybe = refresh()
-                    if inspect.isawaitable(maybe):
-                        await maybe
-                except Exception as exc:
-                    logger.warning(
-                        "Adapter %s refresh_skill_group raised: %s",
-                        getattr(adapter, "name", adapter), exc,
-                    )
 
             lines = [t("gateway.reload_skills.header")]
             if not added and not removed:

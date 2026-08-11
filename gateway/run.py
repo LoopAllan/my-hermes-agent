@@ -9718,8 +9718,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             try:
                 changed = await loop.run_in_executor(None, update_marketplace_worktree, self.config)
                 if changed:
-                    from agent.skill_commands import reload_skills
-                    await loop.run_in_executor(None, reload_skills)
+                    await self._reload_skills_runtime()
                     logger.info("marketplace skills reloaded after fast-forward")
             except asyncio.CancelledError:
                 raise
