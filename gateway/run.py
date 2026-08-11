@@ -9709,14 +9709,21 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
     async def _marketplace_skills_watcher(self) -> None:
         """Fast-forward a trusted external marketplace and rescan skills."""
         from gateway.marketplace_updater import marketplace_config, update_marketplace_worktree
-        settings = marketplace_config(self.config)
+        from hermes_cli.config import load_config_readonly
+
+        # ``self.config`` is a GatewayConfig projection and intentionally does
+        # not retain unrelated top-level config blocks such as ``skills``.
+        # Marketplace settings belong to the full user config, so resolve that
+        # source once and share it with both validation and the update worker.
+        user_config = load_config_readonly()
+        settings = marketplace_config(user_config)
         if not settings:
             return
         interval = settings["interval_seconds"]
         loop = asyncio.get_running_loop()
         while self._running:
             try:
-                changed = await loop.run_in_executor(None, update_marketplace_worktree, self.config)
+                changed = await loop.run_in_executor(None, update_marketplace_worktree, user_config)
                 if changed:
                     await self._reload_skills_runtime()
                     logger.info("marketplace skills reloaded after fast-forward")

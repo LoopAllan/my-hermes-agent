@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from gateway import marketplace_updater
 
 
@@ -43,6 +45,36 @@ def test_marketplace_config_is_opt_in_and_validates_values():
     }
     assert marketplace_updater.marketplace_config(_config(Path("/tmp/repo"), remote="--upload-pack=bad")) is None
     assert marketplace_updater.marketplace_config(_config(Path("/tmp/repo"), interval_seconds="bad")) is None
+
+
+@pytest.mark.asyncio
+async def test_gateway_watcher_reads_marketplace_from_full_user_config(monkeypatch, tmp_path: Path):
+    from gateway import run as gateway_run
+    from gateway.config import GatewayConfig
+    from hermes_cli import config as user_config
+
+    full_config = _config(tmp_path / "marketplace")
+    received = []
+    runner = gateway_run.GatewayRunner.__new__(gateway_run.GatewayRunner)
+    runner.config = GatewayConfig()
+    runner._running = True
+
+    monkeypatch.setattr(user_config, "load_config_readonly", lambda: full_config)
+
+    def update(config):
+        received.append(config)
+        runner._running = False
+        return False
+
+    async def skip_sleep(_interval):
+        return None
+
+    monkeypatch.setattr(gateway_run.asyncio, "sleep", skip_sleep)
+    monkeypatch.setattr(marketplace_updater, "update_marketplace_worktree", update)
+
+    await runner._marketplace_skills_watcher()
+
+    assert received == [full_config]
 
 
 def test_update_refuses_checkout_outside_external_skill_roots(monkeypatch, tmp_path: Path):
