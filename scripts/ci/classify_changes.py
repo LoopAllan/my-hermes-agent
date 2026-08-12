@@ -11,7 +11,6 @@ Lanes:
 * ``python``      — pytest / ruff / ty / footguns.
 * ``docker_meta`` — Dockerfiles etc.
 * ``frontend``    — TS typecheck matrix + desktop build.
-* ``site``        — Docusaurus + generated skill docs.
 * ``scan``        — supply-chain scan (Python files, .pth, setup hooks).
 * ``deps``        — pyproject.toml dependency bounds check.
 * ``mcp_catalog`` — bundled MCP catalog / installer review.
@@ -37,7 +36,6 @@ import sys
 _FRONTEND = ("ui-tui/", "web/", "apps/")  # TS typecheck-matrix packages
 _ROOT_NPM = {"package.json", "package-lock.json"}  # shifts every package's tree
 _DOCKER_META = ("docker/", ".hadolint.yml", "Dockerfile") # docker setup
-_SITE = ("website/", "skills/", "optional-skills/")  # docs site + skill pages
 # Prose/frontend trees that can't touch Python. skills/ is excluded on purpose.
 _PY_SKIP = ("docs/", "website/") + _FRONTEND
 
@@ -74,7 +72,6 @@ def classify(files: list[str]) -> dict[str, bool]:
         "python": any(not _py_irrelevant(f) for f in files),
         "docker_meta":  any(f.startswith(_DOCKER_META) for f in files),
         "frontend": any(f.startswith(_FRONTEND) or f in _ROOT_NPM for f in files),
-        "site": any(f.startswith(_SITE) for f in files),
         "scan": any(_is_scan(f) for f in files),
         "deps": any(f == "pyproject.toml" for f in files),
         "mcp_catalog": any(_is_mcp_catalog(f) for f in files),
@@ -83,7 +80,6 @@ def classify(files: list[str]) -> dict[str, bool]:
         ret["python"] = True
         ret["docker_meta"] = True
         ret["frontend"] = True
-        ret["site"] = True
         ret["scan"] = True
         ret["deps"] = True
 
