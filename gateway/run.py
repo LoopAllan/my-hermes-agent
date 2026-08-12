@@ -16848,11 +16848,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     session_key=session_key,
                     user_config=user_config,
                 )
-                model = self._apply_message_model_alias(
+                resolved_model = self._apply_message_model_alias(
                     message,
                     model,
                     user_config if isinstance(user_config, dict) else None,
                 )
+                message_model_alias_applied = resolved_model != model
+                model = resolved_model
                 logger.debug(
                     "run_agent resolved: model=%s provider=%s session=%s",
                     model, runtime_kwargs.get("provider"), session_key or "",
@@ -17814,7 +17816,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     )
 
             effective_session_id = agent_session_id
-            self._sync_session_model_from_agent(effective_session_id, agent)
+            if not message_model_alias_applied:
+                self._sync_session_model_from_agent(effective_session_id, agent)
             # history_offset=0 whenever the agent's message list no longer has
             # the original history prefix — i.e. on rotation (split) OR in-place
             # compaction. In both cases the returned `messages` is the compacted
