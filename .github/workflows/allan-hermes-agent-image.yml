@@ -101,9 +101,13 @@ jobs:
             exit 1
           }
 
-          python3 "$GITHUB_WORKSPACE/.github/scripts/promote_allan_hermes_gitops.py" \
-            --profile "$GITOPS_PROFILE" \
-            --digest "$digest"
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "$PWD:/gitops" \
+            -v "$GITHUB_WORKSPACE/.github/scripts/promote_allan_hermes_gitops.py:/tmp/promote_allan_hermes_gitops.py:ro" \
+            "$TEST_IMAGE" \
+            python3 /tmp/promote_allan_hermes_gitops.py \
+              --profile "/gitops/$GITOPS_PROFILE" \
+              --digest "$digest"
           if git diff --quiet -- "$GITOPS_PROFILE"; then
             echo "GitOps profile already pins $digest"
             exit 0
