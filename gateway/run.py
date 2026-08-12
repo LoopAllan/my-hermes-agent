@@ -24079,6 +24079,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
             pr = self._provider_routing
             max_iterations = _current_max_iterations()
+            # Alias first: reasoning resolution below is model-aware, and the
+            # main turn path likewise aliases before resolving reasoning.
+            model = self._apply_message_model_alias(
+                prompt,
+                model,
+                user_config if isinstance(user_config, dict) else None,
+            )
             reasoning_config = self._resolve_session_reasoning_config(
                 source=source, model=model
             )

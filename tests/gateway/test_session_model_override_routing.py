@@ -205,6 +205,43 @@ async def test_background_task_prefers_session_override_over_global_runtime(monk
     assert _CapturingAgent.last_init["api_key"] == "***"
     assert _CapturingAgent.last_init["reasoning_config"] == {"enabled": True, "effort": "high"}
 
+
+@pytest.mark.asyncio
+async def test_background_task_applies_message_alias_to_current_turn(monkeypatch):
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Sol": {"model": "gpt5.6-sol"}}}},
+    )
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+
+    _CapturingAgent.last_init = None
+    runner = _make_runner()
+    adapter = AsyncMock()
+    adapter.send = AsyncMock()
+    adapter.extract_media = MagicMock(return_value=([], "ok"))
+    adapter.extract_images = MagicMock(return_value=([], "ok"))
+    runner.adapters[Platform.TELEGRAM] = adapter
+    source = SessionSource(
+        platform=Platform.TELEGRAM,
+        user_id="12345",
+        chat_id="67890",
+        user_name="testuser",
+    )
+    session_key = runner._session_key_for_source(source)
+    runner._session_model_overrides[session_key] = _codex_override()
+
+    await runner._run_background_task("Sol, inspect the error logs.", source, "bg_test")
+
+    assert _CapturingAgent.last_init is not None
+    assert _CapturingAgent.last_init["model"] == "gpt5.6-sol"
+    assert _CapturingAgent.last_init["provider"] == "openai-codex"
+
+
 def test_gateway_auth_fallback_uses_fallback_model_from_config(tmp_path, monkeypatch):
     """Regression: fallback provider must not inherit the primary model.
 
