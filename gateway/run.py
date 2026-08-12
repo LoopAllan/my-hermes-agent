@@ -5721,17 +5721,22 @@ class TurnRunner:
 
         max_iterations = _current_max_iterations()
 
+        # An inline message alias applies to this turn only, so it must not be
+        # written back as the session's model further below.
+        _message_model_alias_applied = False
         try:
             model, runtime_kwargs = self._runner._resolve_session_agent_runtime(
                 source=ctx.source,
                 session_key=ctx.session_key,
                 user_config=ctx.user_config,
             )
-            model = self._runner._apply_message_model_alias(
+            _resolved_model = self._runner._apply_message_model_alias(
                 ctx.message,
                 model,
                 ctx.user_config if isinstance(ctx.user_config, dict) else None,
             )
+            _message_model_alias_applied = _resolved_model != model
+            model = _resolved_model
             logger.debug(
                 "run_agent resolved: model=%s provider=%s session=%s",
                 model, runtime_kwargs.get("provider"), ctx.session_key or "",
@@ -7040,7 +7045,8 @@ class TurnRunner:
                 )
 
         effective_session_id = agent_session_id
-        self._runner._sync_session_model_from_agent(effective_session_id, agent)
+        if not _message_model_alias_applied:
+            self._runner._sync_session_model_from_agent(effective_session_id, agent)
         # history_offset=0 whenever the agent's message list no longer has
         # the original history prefix — i.e. on rotation (split) OR in-place
         # compaction. In both cases the returned `messages` is the compacted

@@ -141,6 +141,7 @@ def test_run_agent_applies_message_alias_to_current_turn(monkeypatch):
 
     _CapturingAgent.last_init = None
     runner = _make_runner()
+    runner._sync_session_model_from_agent = MagicMock()
     source = SessionSource(
         platform=Platform.LOCAL,
         chat_id="cli",
@@ -165,6 +166,7 @@ def test_run_agent_applies_message_alias_to_current_turn(monkeypatch):
     assert result["final_response"] == "ok"
     assert _CapturingAgent.last_init["model"] == "gpt5.6-sol"
     assert _CapturingAgent.last_init["provider"] == "openai-codex"
+    runner._sync_session_model_from_agent.assert_not_called()
 
 
 @pytest.mark.asyncio
