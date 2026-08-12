@@ -39,17 +39,18 @@ def test_pin_digest_requires_the_gitops_profile_to_exist(tmp_path):
         promotion.pin_digest(tmp_path / "missing.yaml", "sha256:" + "a" * 64)
 
 
-def test_workflow_runs_promotion_script_with_python():
+def test_workflow_runs_promotion_script_in_the_tested_image():
     workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "allan-hermes-agent-image.yml").read_text(encoding="utf-8")
 
-    assert 'python3 "$GITHUB_WORKSPACE/.github/scripts/promote_allan_hermes_gitops.py"' in workflow
+    assert '"$TEST_IMAGE" \\\n            python3 /tmp/promote_allan_hermes_gitops.py' in workflow
 
 
 @pytest.mark.parametrize(
     ("content", "digest", "error"),
     [
-        (_PROFILE.replace("allan-hermes-agent", "wrong-image"), "sha256:" + "a" * 64, "expected exactly one"),
+        (_PROFILE.replace("allan-hermes-agent", "wrong-image"), "sha256:" + "a" * 64, "expected allan-hermes-agent profile image"),
         (_PROFILE.replace("    pullPolicy", "    digest: sha256:" + "2" * 64 + "\n    pullPolicy"), "sha256:" + "a" * 64, "duplicate YAML key: digest"),
+        (_PROFILE.replace("    pullPolicy", "    digest : sha256:" + "2" * 64 + "\n    pullPolicy"), "sha256:" + "a" * 64, "duplicate YAML key: digest"),
         (_PROFILE, "sha256:ABC", "image digest must be"),
     ],
 )
