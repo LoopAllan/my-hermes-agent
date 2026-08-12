@@ -30489,6 +30489,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     else f"⏳ Working — {_elapsed_mins} min{_status_detail}"
                 )
                 try:
+                    from gateway.status_phrase_generator import generate_status_phrase
+
+                    _generated_heartbeat = await generate_status_phrase()
+                    if _generated_heartbeat:
+                        _heartbeat_text = _generated_heartbeat
+                except Exception:
+                    logger.debug("Generated long-running status unavailable", exc_info=True)
+                try:
                     _notify_res = None
                     if _heartbeat_msg_id:
                         try:
