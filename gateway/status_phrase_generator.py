@@ -6,6 +6,19 @@ import re
 from typing import Any
 
 _MAX_LENGTH = 160
+# Fail closed: a generated heartbeat may only express generic progress and a
+# future reply. These are safety predicates, not response templates.
+_FORBIDDEN_TERMS = re.compile(
+    r"\b(?:password|secret|token|api[ -]?key|private|email|searched|tool|command|error|failed|failure)\b"
+    r"|任務|錯誤|失敗|密碼|祕密|秘密|權杖|私密|信件|搜尋|工具|指令",
+    re.IGNORECASE,
+)
+_ENGLISH_PROGRESS = re.compile(r"\b(?:still\s+)?(?:working|handling|processing|continuing)\b|\bon\s+it\b", re.IGNORECASE)
+_ENGLISH_REPLY = re.compile(r"\b(?:reply|respond|get\s+back)\b", re.IGNORECASE)
+_ENGLISH_FUTURE = re.compile(r"\b(?:when|once|after|soon|later)\b", re.IGNORECASE)
+_ZH_PROGRESS = re.compile(r"(?:還在|仍在|正在|繼續).{0,8}(?:處理|進行|整理)|(?:處理|進行|整理).{0,8}(?:中|著)")
+_ZH_REPLY = re.compile(r"(?:回覆|答覆|回應)")
+_ZH_FUTURE = re.compile(r"(?:完成後|稍後|之後|一會|待.{0,8}完成)")
 
 
 def _configured_language() -> str | None:
@@ -35,13 +48,19 @@ def _valid_sentence(content: Any, language: str) -> str | None:
         or sentence[-1] not in ".!?。！？"
     ):
         return None
+    if _FORBIDDEN_TERMS.search(sentence):
+        return None
     has_han = bool(re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", sentence))
     has_kana_or_hangul = bool(re.search(r"[\u3040-\u30ff\uac00-\ud7af]", sentence))
     normalized = language.casefold().replace("_", "-").strip()
     if normalized in {"english", "en", "en-us", "en-gb"}:
-        return sentence if re.search(r"[A-Za-z]", sentence) and not has_han and not has_kana_or_hangul else None
+        if not (re.search(r"[A-Za-z]", sentence) and not has_han and not has_kana_or_hangul):
+            return None
+        return sentence if _ENGLISH_PROGRESS.search(sentence) and _ENGLISH_REPLY.search(sentence) and _ENGLISH_FUTURE.search(sentence) else None
     if normalized in {"traditional chinese", "traditional chinese (taiwan)", "chinese (traditional)", "zh-tw", "zh-hant"}:
-        return sentence if has_han and not has_kana_or_hangul else None
+        if not (has_han and not has_kana_or_hangul):
+            return None
+        return sentence if _ZH_PROGRESS.search(sentence) and _ZH_REPLY.search(sentence) and _ZH_FUTURE.search(sentence) else None
     return None
 
 
