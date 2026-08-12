@@ -1,69 +1,22 @@
-from types import SimpleNamespace
-
 import pytest
 
-from gateway.status_phrase_generator import _valid_sentence, generate_status_phrase
-
-
-@pytest.mark.parametrize(
-    ("language", "content"),
-    [
-        ("English", "Still working and I will reply soon."),
-        ("Traditional Chinese (Taiwan)", "我還在處理，完成後會回覆你。"),
-    ],
-)
-def test_valid_sentence_accepts_configured_language(language, content):
-    assert _valid_sentence(content, language) == content
-
-
-@pytest.mark.parametrize(
-    "content",
-    [
-        "Label: Still working.",
-        "•Still working.",
-        "1. Still working.",
-        "Still working. I will reply soon.",
-        "Still working and I will reply soon",
-        "我還在處理，完成後會回覆你。",
-        "My password is abc.",
-        "I searched your private email.",
-        "The task failed.",
-        "I am still working, but the task failed and I will reply soon.",
-        "I am still working on it.",
-        "Still working on the payroll project and I will reply soon.",
-        "Still working on SSN data and I will reply soon.",
-        "Still working in the terminal and I will reply soon.",
-        "Still working after an exception and I will reply soon.",
-        "Still working after an unsuccessful attempt and I will reply soon.",
-        "Still working with a bearer credential and I will reply soon.",
-        "我還在處理薪資專案，完成後會回覆你。",
-    ],
-)
-def test_valid_sentence_rejects_malformed_wrong_language_or_unsafe_content(content):
-    assert _valid_sentence(content, "English") is None
+from gateway.status_phrase_generator import generate_status_phrase
 
 
 @pytest.mark.asyncio
-async def test_generate_returns_none_when_task_is_not_configured(monkeypatch):
-    monkeypatch.setattr("hermes_cli.config.load_config", lambda: {"auxiliary": {}})
+async def test_generate_selects_trimmed_phrase_from_environment(monkeypatch):
+    monkeypatch.setenv(
+        "HEART_BEAT_WORKING_PHASES",
+        "  我還在處理中，完成後回覆你。 , ,請稍等，我整理好就回覆你。  ",
+    )
+
+    phrase = await generate_status_phrase()
+
+    assert phrase in {"我還在處理中，完成後回覆你。", "請稍等，我整理好就回覆你。"}
+
+
+@pytest.mark.asyncio
+async def test_generate_returns_none_without_usable_environment_phrases(monkeypatch):
+    monkeypatch.setenv("HEART_BEAT_WORKING_PHASES", " ,  , ")
 
     assert await generate_status_phrase() is None
-
-
-@pytest.mark.asyncio
-async def test_generate_uses_existing_auxiliary_task_router(monkeypatch):
-    monkeypatch.setattr(
-        "hermes_cli.config.load_config",
-        lambda: {"auxiliary": {"status_phrase_generation": {"language": "English"}}},
-    )
-    captured = {}
-
-    async def fake_call_llm(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Still working and I will reply soon."))])
-
-    monkeypatch.setattr("agent.auxiliary_client.async_call_llm", fake_call_llm)
-
-    assert await generate_status_phrase() == "Still working and I will reply soon."
-    assert captured["task"] == "status_phrase_generation"
-    assert "task details" in captured["messages"][0]["content"]
