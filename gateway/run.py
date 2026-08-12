@@ -12654,6 +12654,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             reasoning_config = self._resolve_session_reasoning_config(source=source)
             self._reasoning_config = reasoning_config
             self._service_tier = self._load_service_tier()
+            model = self._apply_message_model_alias(
+                prompt,
+                model,
+                user_config if isinstance(user_config, dict) else None,
+            )
             turn_route = self._resolve_turn_agent_config(prompt, model, runtime_kwargs)
 
             # Enrich the prompt with image descriptions so the background
