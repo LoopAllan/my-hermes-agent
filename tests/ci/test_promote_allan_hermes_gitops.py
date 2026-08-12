@@ -43,6 +43,7 @@ def test_pin_digest_requires_the_gitops_profile_to_exist(tmp_path):
     ("content", "digest", "error"),
     [
         (_PROFILE.replace("allan-hermes-agent", "wrong-image"), "sha256:" + "a" * 64, "expected exactly one"),
+        (_PROFILE.replace("    pullPolicy", "    digest: sha256:" + "2" * 64 + "\n    pullPolicy"), "sha256:" + "a" * 64, "duplicate YAML key: digest"),
         (_PROFILE, "sha256:ABC", "image digest must be"),
     ],
 )

@@ -8,12 +8,27 @@ import re
 from pathlib import Path
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_PROFILE_IMAGE = re.compile(
-    r"(?ms)^  image:\n"
-    r"(?=^(?:    [^\n]*\n)*?    repository: ghcr\.io/loopallan/allan-hermes-agent$)"
-    r"(?:    [^\n]*\n)*?"
-    r"^(?P<prefix>    digest: )(?P<current>sha256:[0-9a-f]{64})$"
-)
+_IMAGE_BLOCK = re.compile(r"(?m)^  image:\n(?P<body>(?:^    [^\n]*\n?)*)")
+_EXPECTED_REPOSITORY = "ghcr.io/loopallan/allan-hermes-agent"
+
+
+def _profile_image_digest(content: str) -> tuple[int, int, str]:
+    """Return the one unambiguous Allan Hermes profile digest location and value."""
+    candidates = []
+    for block in _IMAGE_BLOCK.finditer(content):
+        body = block.group("body")
+        repositories = re.findall(r"(?m)^    repository: ([^\n]+)$", body)
+        if repositories != [_EXPECTED_REPOSITORY]:
+            continue
+        digests = list(re.finditer(r"(?m)^    digest: (sha256:[0-9a-f]{64})$", body))
+        if len(digests) != 1:
+            raise ValueError("expected exactly one allan-hermes-agent profile image digest")
+        candidates.append((block.start("body") + digests[0].start(1), block.start("body") + digests[0].end(1)))
+
+    if len(candidates) != 1:
+        raise ValueError("expected exactly one allan-hermes-agent profile image digest")
+    start, end = candidates[0]
+    return start, end, content[start:end]
 
 
 def pin_digest(path: Path, digest: str) -> bool:
@@ -24,13 +39,16 @@ def pin_digest(path: Path, digest: str) -> bool:
         raise FileNotFoundError(f"required GitOps profile is missing: {path}")
 
     content = path.read_text(encoding="utf-8")
-    match = _PROFILE_IMAGE.search(content)
-    if not match or len(_PROFILE_IMAGE.findall(content)) != 1:
-        raise ValueError("expected exactly one allan-hermes-agent profile image digest")
-    if match.group("current") == digest:
+    for block in _IMAGE_BLOCK.finditer(content):
+        body = block.group("body")
+        if re.findall(r"(?m)^    repository: ([^\n]+)$", body) == [_EXPECTED_REPOSITORY]:
+            if len(re.findall(r"(?m)^    digest:", body)) != 1:
+                raise ValueError("duplicate YAML key: digest")
+    start, end, current_digest = _profile_image_digest(content)
+    if current_digest == digest:
         return False
 
-    updated = content[:match.start("current")] + digest + content[match.end("current"):]
+    updated = content[:start] + digest + content[end:]
     path.write_text(updated, encoding="utf-8")
     return True
 
