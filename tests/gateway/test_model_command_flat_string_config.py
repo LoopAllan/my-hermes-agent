@@ -137,3 +137,28 @@ async def test_model_global_persists_when_config_has_missing_model(tmp_path, mon
     assert written["model"]["provider"] == "openrouter"
 
 
+
+
+@pytest.mark.asyncio
+async def test_model_reports_session_only_when_global_config_is_read_only(
+    tmp_path, monkeypatch
+):
+    """A typed switch remains active for this session when config is immutable."""
+    _setup_isolated_home(
+        tmp_path,
+        monkeypatch,
+        {"default": "old-model", "provider": "openai-codex"},
+    )
+    monkeypatch.setattr(
+        "hermes_cli.config.save_config",
+        lambda _cfg: (_ for _ in ()).throw(OSError(30, "Read-only file system")),
+    )
+
+    result = await _make_runner()._handle_model_command(
+        _make_event("/model gpt-5.5 --global")
+    )
+
+    assert result is not None
+    assert "gpt-5.5" in result
+    assert "session" in result.lower()
+    assert "saved" not in result.lower()

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import errno
 import hashlib
 import inspect
 import logging
@@ -2038,6 +2039,7 @@ class GatewaySlashCommandsMixin:
                         # Persist to config (default) unless --session opted out,
                         # mirroring the text /model command path above so a picked
                         # model survives across sessions like a typed one (#49066).
+                        persisted_global = False
                         if persist_global:
                             try:
                                 # Write-back round-trip: raw read is correct
@@ -2091,6 +2093,15 @@ class GatewaySlashCommandsMixin:
                                     clear_model_endpoint_credentials(_persist_model_cfg, clear_base_url=True)
                                 from hermes_cli.config import save_config
                                 save_config(_persist_cfg)
+                                persisted_global = True
+                            except OSError as e:
+                                if e.errno in {errno.EACCES, errno.EPERM, errno.EROFS}:
+                                    logger.info(
+                                        "Model switch config is not writable; keeping %s session-only",
+                                        result.new_model,
+                                    )
+                                else:
+                                    logger.warning("Failed to persist model switch: %s", e)
                             except Exception as e:
                                 logger.warning("Failed to persist model switch: %s", e)
 
@@ -2138,7 +2149,7 @@ class GatewaySlashCommandsMixin:
                             lines.append(t("gateway.model.capabilities_label", capabilities=mi.format_capabilities()))
                         if result.warning_message:
                             lines.append(t("gateway.model.warning_prefix", warning=result.warning_message))
-                        if persist_global:
+                        if persisted_global:
                             lines.append(t("gateway.model.saved_global"))
                         else:
                             lines.append(t("gateway.model.session_only_hint"))
@@ -2366,6 +2377,7 @@ class GatewaySlashCommandsMixin:
             # override rather than relying on cache signature mismatch detection.
             self._evict_cached_agent(session_key)
 
+            persisted_global = False
             # Persist to config (default) unless --session opted out
             if persist_global:
                 try:
@@ -2420,6 +2432,15 @@ class GatewaySlashCommandsMixin:
                         clear_model_endpoint_credentials(model_cfg, clear_base_url=True)
                     from hermes_cli.config import save_config
                     save_config(cfg)
+                    persisted_global = True
+                except OSError as e:
+                    if e.errno in {errno.EACCES, errno.EPERM, errno.EROFS}:
+                        logger.info(
+                            "Model switch config is not writable; keeping %s session-only",
+                            result.new_model,
+                        )
+                    else:
+                        logger.warning("Failed to persist model switch: %s", e)
                 except Exception as e:
                     logger.warning("Failed to persist model switch: %s", e)
 
@@ -2478,7 +2499,7 @@ class GatewaySlashCommandsMixin:
             if result.warning_message:
                 lines.append(t("gateway.model.warning_prefix", warning=result.warning_message))
 
-            if persist_global:
+            if persisted_global:
                 lines.append(t("gateway.model.saved_global"))
             elif one_turn:
                 lines.append("    (next turn only — restores after one response)")

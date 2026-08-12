@@ -253,3 +253,32 @@ async def test_multiplex_picker_global_persists_only_named_profile(
     assert written["marker"] == "named"
     assert written["model"]["default"] == "gpt-5.5"
     assert written["model"]["provider"] == "openrouter"
+
+
+@pytest.mark.asyncio
+async def test_picker_tap_reports_session_only_when_global_config_is_read_only(
+    tmp_path, monkeypatch
+):
+    """A failed config write must not claim the selected model was saved.
+
+    Kubernetes commonly projects config.yaml from a read-only ConfigMap. The
+    picker still applies its per-session override, but its confirmation must
+    accurately describe that non-persistent result.
+    """
+    adapter = _FakePickerAdapter()
+    _setup_isolated_home(
+        tmp_path, monkeypatch, {"default": "old-model", "provider": "openai-codex"}
+    )
+    monkeypatch.setattr(
+        "hermes_cli.config.save_config",
+        lambda _cfg: (_ for _ in ()).throw(OSError(30, "Read-only file system")),
+    )
+    runner = _make_runner(adapter)
+
+    confirmation = await _drive_picker(runner, _make_event("/model"))
+
+    assert confirmation is not None
+    assert "gpt-5.5" in confirmation
+    assert "session" in confirmation.lower()
+    assert "saved" not in confirmation.lower()
+    assert runner._session_model_overrides
