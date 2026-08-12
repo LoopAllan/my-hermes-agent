@@ -6,6 +6,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 _SCRIPT = Path(__file__).resolve().parents[2] / ".github" / "scripts" / "promote_allan_hermes_gitops.py"
@@ -40,11 +41,18 @@ def test_pin_digest_requires_the_gitops_profile_to_exist(tmp_path):
 
 
 def test_workflow_binds_gitops_secret_to_main_only_promotion_job():
-    workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "allan-hermes-agent-image.yml").read_text(encoding="utf-8")
+    workflow_path = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "allan-hermes-agent-image.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    promotion_job = workflow["jobs"]["promote-gitops"]
 
-    assert '  promote-gitops:\n    if: github.event_name == \'push\' && github.ref == \'refs/heads/main\'\n    needs: build-test-and-publish\n    runs-on: ubuntu-latest\n    timeout-minutes: 15\n    environment: ALLAN_APPS_GITOPS_TOKEN' in workflow
-    assert '      - name: Pull published image\n        run: docker pull "$IMAGE_NAME:${GITHUB_SHA}"' in workflow
-    assert '"$IMAGE_NAME:${GITHUB_SHA}" \\\n            python3 /tmp/promote_allan_hermes_gitops.py' in workflow
+    assert promotion_job["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    assert promotion_job["needs"] == "build-test-and-publish"
+    assert promotion_job["environment"] == "ALLAN_APPS_GITOPS_TOKEN"
+    pull_step = next(step for step in promotion_job["steps"] if step["name"] == "Pull published image")
+    assert pull_step["run"] == 'docker pull "$IMAGE_NAME:${GITHUB_SHA}"'
+    promotion_step = next(step for step in promotion_job["steps"] if step["name"] == "Promote immutable image digest to Allan GitOps")
+    assert 'docker run --rm --entrypoint python3 --user "$(id -u):$(id -g)"' in promotion_step["run"]
+    assert '"$IMAGE_NAME:${GITHUB_SHA}" \\\n    /tmp/promote_allan_hermes_gitops.py' in promotion_step["run"]
 
 
 @pytest.mark.parametrize(
