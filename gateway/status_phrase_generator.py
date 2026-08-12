@@ -13,6 +13,14 @@ _FORBIDDEN_TERMS = re.compile(
     r"|任務|錯誤|失敗|密碼|祕密|秘密|權杖|私密|信件|搜尋|工具|指令",
     re.IGNORECASE,
 )
+# A deliberately tiny permitted vocabulary makes leakage of model-invented
+# project details fail closed. It defines safety classes, never fixed replies.
+_ENGLISH_WORDS = frozenset({
+    "i", "am", "i'm", "still", "working", "processing", "handling", "on", "it",
+    "and", "will", "reply", "respond", "get", "back", "to", "you", "when", "once",
+    "after", "soon", "later", "finished", "complete", "completed", "this", "is", "being",
+})
+_ZH_ALLOWED = frozenset("我你還仍正繼在處理進行整理中著完成功後稍之會回覆答應請等一下點事務")
 _ENGLISH_PROGRESS = re.compile(r"\b(?:still\s+)?(?:working|handling|processing|continuing)\b|\bon\s+it\b", re.IGNORECASE)
 _ENGLISH_REPLY = re.compile(r"\b(?:reply|respond|get\s+back)\b", re.IGNORECASE)
 _ENGLISH_FUTURE = re.compile(r"\b(?:when|once|after|soon|later)\b", re.IGNORECASE)
@@ -54,11 +62,13 @@ def _valid_sentence(content: Any, language: str) -> str | None:
     has_kana_or_hangul = bool(re.search(r"[\u3040-\u30ff\uac00-\ud7af]", sentence))
     normalized = language.casefold().replace("_", "-").strip()
     if normalized in {"english", "en", "en-us", "en-gb"}:
-        if not (re.search(r"[A-Za-z]", sentence) and not has_han and not has_kana_or_hangul):
+        words = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", sentence.casefold())
+        if not (words and set(words) <= _ENGLISH_WORDS and not has_han and not has_kana_or_hangul):
             return None
         return sentence if _ENGLISH_PROGRESS.search(sentence) and _ENGLISH_REPLY.search(sentence) and _ENGLISH_FUTURE.search(sentence) else None
     if normalized in {"traditional chinese", "traditional chinese (taiwan)", "chinese (traditional)", "zh-tw", "zh-hant"}:
-        if not (has_han and not has_kana_or_hangul):
+        han_chars = set(re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff]", sentence))
+        if not (han_chars and han_chars <= _ZH_ALLOWED and not has_kana_or_hangul):
             return None
         return sentence if _ZH_PROGRESS.search(sentence) and _ZH_REPLY.search(sentence) and _ZH_FUTURE.search(sentence) else None
     return None
