@@ -30,6 +30,13 @@ def test_valid_sentence_accepts_configured_language(language, content):
         "The task failed.",
         "I am still working, but the task failed and I will reply soon.",
         "I am still working on it.",
+        "Still working on the payroll project and I will reply soon.",
+        "Still working on SSN data and I will reply soon.",
+        "Still working in the terminal and I will reply soon.",
+        "Still working after an exception and I will reply soon.",
+        "Still working after an unsuccessful attempt and I will reply soon.",
+        "Still working with a bearer credential and I will reply soon.",
+        "我還在處理薪資專案，完成後會回覆你。",
     ],
 )
 def test_valid_sentence_rejects_malformed_wrong_language_or_unsafe_content(content):
