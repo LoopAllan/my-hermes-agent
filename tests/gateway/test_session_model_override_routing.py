@@ -126,6 +126,47 @@ def test_run_agent_prefers_session_override_over_global_runtime(monkeypatch):
     assert _CapturingAgent.last_init["reasoning_config"] == {"enabled": True, "effort": "high"}
 
 
+def test_run_agent_applies_message_alias_to_current_turn(monkeypatch):
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Sol": {"model": "gpt5.6-sol"}}}},
+    )
+    monkeypatch.setattr(gateway_run, "load_dotenv", lambda *args, **kwargs: None)
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+
+    _CapturingAgent.last_init = None
+    runner = _make_runner()
+    source = SessionSource(
+        platform=Platform.LOCAL,
+        chat_id="cli",
+        chat_name="CLI",
+        chat_type="dm",
+        user_id="user-1",
+    )
+    session_key = "agent:main:local:dm"
+    runner._session_model_overrides[session_key] = _codex_override()
+
+    result = asyncio.run(
+        runner._run_agent(
+            message="Sol, inspect the error logs.",
+            context_prompt="",
+            history=[],
+            source=source,
+            session_id="session-1",
+            session_key=session_key,
+        )
+    )
+
+    assert result["final_response"] == "ok"
+    assert _CapturingAgent.last_init["model"] == "gpt5.6-sol"
+    assert _CapturingAgent.last_init["provider"] == "openai-codex"
+
+
 @pytest.mark.asyncio
 async def test_background_task_prefers_session_override_over_global_runtime(monkeypatch):
     monkeypatch.setattr(gateway_run, "_load_gateway_config", lambda: {})
