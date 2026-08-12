@@ -123,11 +123,11 @@ jobs:
             exit 1
           }
 
-          docker run --rm --user "$(id -u):$(id -g)" \
+          docker run --rm --entrypoint python3 --user "$(id -u):$(id -g)" \
             -v "$PWD:/gitops" \
             -v "$GITHUB_WORKSPACE/.github/scripts/promote_allan_hermes_gitops.py:/tmp/promote_allan_hermes_gitops.py:ro" \
             "$IMAGE_NAME:${GITHUB_SHA}" \
-            python3 /tmp/promote_allan_hermes_gitops.py \
+              /tmp/promote_allan_hermes_gitops.py \
               --profile "/gitops/$GITOPS_PROFILE" \
               --digest "$digest"
           if git diff --quiet -- "$GITOPS_PROFILE"; then
