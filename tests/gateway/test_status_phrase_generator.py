@@ -25,9 +25,14 @@ def test_valid_sentence_accepts_configured_language(language, content):
         "Still working. I will reply soon.",
         "Still working and I will reply soon",
         "我還在處理，完成後會回覆你。",
+        "My password is abc.",
+        "I searched your private email.",
+        "The task failed.",
+        "I am still working, but the task failed and I will reply soon.",
+        "I am still working on it.",
     ],
 )
-def test_valid_sentence_rejects_malformed_or_wrong_language(content):
+def test_valid_sentence_rejects_malformed_wrong_language_or_unsafe_content(content):
     assert _valid_sentence(content, "English") is None
 
 
