@@ -30495,40 +30495,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 ):
                     break
                 _elapsed_mins = int((time.time() - _notify_start) // 60)
-                # Include agent activity context if available. Default
-                # heartbeat is terse: elapsed + current tool. Verbose
-                # iteration counter is gated on busy_ack_detail so users
-                # who want it can opt in per platform.
-                _agent_ref = agent_holder[0]
-                _status_detail = ""
-                _want_iteration_detail = bool(
-                    resolve_display_setting(
-                        user_config,
-                        platform_key,
-                        "busy_ack_detail",
-                        True,
-                    )
-                )
-                if _agent_ref and hasattr(_agent_ref, "get_activity_summary"):
-                    try:
-                        _a = _agent_ref.get_activity_summary()
-                        _parts = []
-                        if _want_iteration_detail:
-                            _parts.append(
-                                f"iteration {_a['api_call_count']}/{_a['max_iterations']}"
-                            )
-                        _action = _a.get("current_tool") or _a.get("last_activity_desc")
-                        if _action:
-                            _parts.append(str(_action))
-                        if _parts:
-                            _status_detail = " — " + ", ".join(_parts)
-                    except Exception:
-                        pass
-                _heartbeat_text = (
-                    _generic_status_phrase("status")
-                    if _long_running_mode == "generic"
-                    else f"⏳ Working — {_elapsed_mins} min{_status_detail}"
-                )
+                # The user-facing heartbeat stays terse — elapsed time only.
+                # Internal agent activity (iteration counter, current tool) is
+                # deliberately NOT appended; that is pinned by
+                # tests/gateway/test_status_phrase_generator.py::
+                # test_native_heartbeat_does_not_append_internal_activity_label,
+                # which greps this file for the assignment below.
+                _heartbeat_text = f"⏳ Working — {_elapsed_mins} min"
+                if _long_running_mode == "generic":
+                    _heartbeat_text = _generic_status_phrase("status")
                 try:
                     from gateway.status_phrase_generator import generate_status_phrase
 
@@ -30536,9 +30511,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 except Exception:
                     logger.debug("Configured long-running status unavailable", exc_info=True)
                     _generated_heartbeat = None
-                if not _generated_heartbeat:
-                    continue
-                _heartbeat_text = _generated_heartbeat
+                if _generated_heartbeat:
+                    _heartbeat_text = _generated_heartbeat
                 try:
                     _notify_res = None
                     if _heartbeat_msg_id:
