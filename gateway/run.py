@@ -5727,6 +5727,11 @@ class TurnRunner:
                 session_key=ctx.session_key,
                 user_config=ctx.user_config,
             )
+            model = self._runner._apply_message_model_alias(
+                ctx.message,
+                model,
+                ctx.user_config if isinstance(ctx.user_config, dict) else None,
+            )
             logger.debug(
                 "run_agent resolved: model=%s provider=%s session=%s",
                 model, runtime_kwargs.get("provider"), ctx.session_key or "",
@@ -8674,6 +8679,29 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             self._session_state("*").conversation.last_resolved_model = model
 
         return model, runtime_kwargs
+
+    def _apply_message_model_alias(
+        self, user_message: str, model: str, user_config: dict | None
+    ) -> str:
+        """Apply a configured message alias to this turn's model only.
+
+        Unlike ``/model``, an inline alias never mutates the session override or
+        config.yaml.  Its effect ends with this agent turn, letting the next
+        message return to the session-selected/default model.  The altered model
+        remains part of the agent-cache signature, so cached prompt prefixes are
+        never reused across different models.
+        """
+        from gateway.message_model_aliases import resolve_message_model_alias
+
+        match = resolve_message_model_alias(user_message, user_config)
+        if match is None:
+            return model
+        logger.info(
+            "Message model alias matched: alias=%s model=%s",
+            match.alias,
+            match.model,
+        )
+        return match.model
 
     def _resolve_turn_agent_config(self, user_message: str, model: str, runtime_kwargs: dict) -> dict:
         """Build the effective model/runtime config for a single turn.
