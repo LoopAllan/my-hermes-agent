@@ -3645,6 +3645,29 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         return model, runtime_kwargs
 
+    def _apply_message_model_alias(
+        self, user_message: str, model: str, user_config: dict | None
+    ) -> str:
+        """Apply a configured message alias to this turn's model only.
+
+        Unlike ``/model``, an inline alias never mutates the session override or
+        config.yaml.  Its effect ends with this agent turn, letting the next
+        message return to the session-selected/default model.  The altered model
+        remains part of the agent-cache signature, so cached prompt prefixes are
+        never reused across different models.
+        """
+        from gateway.message_model_aliases import resolve_message_model_alias
+
+        match = resolve_message_model_alias(user_message, user_config)
+        if match is None:
+            return model
+        logger.info(
+            "Message model alias matched: alias=%s model=%s",
+            match.alias,
+            match.model,
+        )
+        return match.model
+
     def _resolve_turn_agent_config(self, user_message: str, model: str, runtime_kwargs: dict) -> dict:
         """Build the effective model/runtime config for a single turn.
 
@@ -12631,6 +12654,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             reasoning_config = self._resolve_session_reasoning_config(source=source)
             self._reasoning_config = reasoning_config
             self._service_tier = self._load_service_tier()
+            model = self._apply_message_model_alias(
+                prompt,
+                model,
+                user_config if isinstance(user_config, dict) else None,
+            )
             turn_route = self._resolve_turn_agent_config(prompt, model, runtime_kwargs)
 
             # Enrich the prompt with image descriptions so the background
@@ -16820,6 +16848,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     session_key=session_key,
                     user_config=user_config,
                 )
+                resolved_model = self._apply_message_model_alias(
+                    message,
+                    model,
+                    user_config if isinstance(user_config, dict) else None,
+                )
+                message_model_alias_applied = resolved_model != model
+                model = resolved_model
                 logger.debug(
                     "run_agent resolved: model=%s provider=%s session=%s",
                     model, runtime_kwargs.get("provider"), session_key or "",
@@ -17781,7 +17816,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     )
 
             effective_session_id = agent_session_id
-            self._sync_session_model_from_agent(effective_session_id, agent)
+            if not message_model_alias_applied:
+                self._sync_session_model_from_agent(effective_session_id, agent)
             # history_offset=0 whenever the agent's message list no longer has
             # the original history prefix — i.e. on rotation (split) OR in-place
             # compaction. In both cases the returned `messages` is the compacted
