@@ -101,7 +101,7 @@ jobs:
             exit 1
           }
 
-          "$GITHUB_WORKSPACE/.github/scripts/promote_allan_hermes_gitops.py" \
+          python3 "$GITHUB_WORKSPACE/.github/scripts/promote_allan_hermes_gitops.py" \
             --profile "$GITOPS_PROFILE" \
             --digest "$digest"
           if git diff --quiet -- "$GITOPS_PROFILE"; then

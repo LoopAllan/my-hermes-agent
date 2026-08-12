@@ -39,6 +39,12 @@ def test_pin_digest_requires_the_gitops_profile_to_exist(tmp_path):
         promotion.pin_digest(tmp_path / "missing.yaml", "sha256:" + "a" * 64)
 
 
+def test_workflow_runs_promotion_script_with_python():
+    workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "allan-hermes-agent-image.yml").read_text(encoding="utf-8")
+
+    assert 'python3 "$GITHUB_WORKSPACE/.github/scripts/promote_allan_hermes_gitops.py"' in workflow
+
+
 @pytest.mark.parametrize(
     ("content", "digest", "error"),
     [
