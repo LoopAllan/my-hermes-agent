@@ -57,7 +57,61 @@ jobs:
       - name: Publish tested image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
+          set -euo pipefail
           docker tag "$TEST_IMAGE" "$IMAGE_NAME:${GITHUB_SHA}"
           docker tag "$TEST_IMAGE" "$IMAGE_NAME:main"
           docker push "$IMAGE_NAME:${GITHUB_SHA}"
           docker push "$IMAGE_NAME:main"
+
+      - name: Promote immutable image digest to Allan GitOps
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          ALLAN_APPS_GITOPS_TOKEN: ${{ secrets.ALLAN_APPS_GITOPS_TOKEN }}
+          GITOPS_REPOSITORY: LoopAllan/allan-apps
+          GITOPS_PROFILE: hermes-agent/overlays/prod/profiles/allan-hermes-dev.yaml
+        run: |
+          set -euo pipefail
+          test -n "$ALLAN_APPS_GITOPS_TOKEN" || {
+            echo "ALLAN_APPS_GITOPS_TOKEN is required to promote Allan Hermes GitOps" >&2
+            exit 1
+          }
+
+          digest="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$IMAGE_NAME:${GITHUB_SHA}")"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "invalid published image digest: $digest" >&2
+            exit 1
+          }
+
+          askpass="$(mktemp)"
+          trap 'rm -f "$askpass"' EXIT
+          cat > "$askpass" <<'EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s' x-access-token ;;
+            *) printf '%s' "$ALLAN_APPS_GITOPS_TOKEN" ;;
+          esac
+          EOF
+          chmod 700 "$askpass"
+          export GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0
+          git clone --depth=1 --branch main --single-branch \
+              "https://github.com/${GITOPS_REPOSITORY}.git" allan-apps
+          cd allan-apps
+          test -f "$GITOPS_PROFILE" || {
+            echo "required GitOps profile is missing: $GITOPS_PROFILE" >&2
+            exit 1
+          }
+
+          "$GITHUB_WORKSPACE/.github/scripts/promote_allan_hermes_gitops.py" \
+            --profile "$GITOPS_PROFILE" \
+            --digest "$digest"
+          if git diff --quiet -- "$GITOPS_PROFILE"; then
+            echo "GitOps profile already pins $digest"
+            exit 0
+          fi
+
+          git config user.name "allan-hermes-agent[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$GITOPS_PROFILE"
+          git diff --cached --check
+          git commit -m "chore(hermes): promote allan image ${GITHUB_SHA}"
+          git push origin HEAD:main
