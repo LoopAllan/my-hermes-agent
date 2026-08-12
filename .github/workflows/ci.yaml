@@ -43,7 +43,6 @@ jobs:
       python: ${{ steps.classify.outputs.python }}
       python_prod: ${{ steps.classify.outputs.python_prod }}
       frontend: ${{ steps.classify.outputs.frontend }}
-      site: ${{ steps.classify.outputs.site }}
       scan: ${{ steps.classify.outputs.scan }}
       deps: ${{ steps.classify.outputs.deps }}
       uv_lock: ${{ steps.classify.outputs.uv_lock }}
@@ -132,12 +131,6 @@ jobs:
     if: ${{ false && (needs.detect.outputs.python_prod == 'true' || needs.detect.outputs.frontend == 'true') }}
     uses: ./.github/workflows/e2e-desktop.yml
 
-  docs-site:
-    name: Docs Site
-    needs: detect
-    if: needs.detect.outputs.site == 'true'
-    uses: ./.github/workflows/docs-site-checks.yml
-
   history-check:
     name: Deny unrelated histories
     needs: detect
@@ -224,7 +217,6 @@ jobs:
       - installer-tests
       - rust-tests
       - e2e-desktop
-      - docs-site
       - history-check
       - contributor-check
       - uv-lockfile

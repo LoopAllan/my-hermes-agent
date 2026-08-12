@@ -29,7 +29,6 @@ DEFAULT = {
     "docker": True,
     "docker_meta": True,
     "nix": True,
-    "site": True,
     "scan": True,
     "deps": True,
     "uv_lock": True,
@@ -41,7 +40,7 @@ DEFAULT = {
 }
 
 
-def _lanes(python=False, frontend=False, site=False, scan=False, deps=False, uv_lock=False, npm_lock=False, installer=False, rust=False, mcp_catalog=False, docker_meta=False, ci_review=False, python_prod=None, nix=None, docker=None) -> dict[str, bool]:
+def _lanes(python=False, frontend=False, scan=False, deps=False, uv_lock=False, npm_lock=False, installer=False, rust=False, mcp_catalog=False, docker_meta=False, ci_review=False, python_prod=None, nix=None, docker=None) -> dict[str, bool]:
     # python_prod tracks python except for tests-only diffs; default it to
     # python so the majority of cases don't need to spell it out.
     #
@@ -57,7 +56,6 @@ def _lanes(python=False, frontend=False, site=False, scan=False, deps=False, uv_
         "nix": _product if nix is None else nix,
         "frontend": frontend,
         "docker_meta": docker_meta,
-        "site": site,
         "scan": scan,
         "deps": deps,
         "uv_lock": uv_lock,
@@ -78,37 +76,38 @@ CASES = {
     "ui-tui → frontend": (["ui-tui/src/entry.ts"], _lanes(frontend=True)),
     # Lockfile bump shifts every TS package's tree, but not the Python suite.
     "root lockfile → frontend, not python": (["package-lock.json"], _lanes(frontend=True, npm_lock=True)),
-    "nested lockfile → npm_lock": (["website/package-lock.json"], _lanes(site=True, npm_lock=True)),
-    # A website file the Python suite cannot read stays site-only.
-    "website config → site": (["website/docusaurus.config.ts"], _lanes(site=True)),
+    "nested lockfile → npm_lock": (["website/package-lock.json"], _lanes(npm_lock=True)),
+    # A website file the Python suite cannot read now triggers no lane at all:
+    # the site lane it used to drive was removed with the docs-site workflows.
+    "website config → no runtime lane": (["website/docusaurus.config.ts"], _lanes()),
     # uv lock --check re-resolves against PyPI, so it must stay off for any
     # diff that can't desync the lockfile — a registry blip on a docs PR
     # otherwise shows up as a blocking "uv.lock out of sync" red X.
     "docs → no uv_lock": (
         ["website/docs/developer-guide/plugins/index.md"],
-        _lanes(python=True, site=True),
+        _lanes(python=True),
     ),
     "frontend → no uv_lock": (["apps/desktop/src/store/profile.ts"], _lanes(frontend=True)),
     # The published CIMD document is asserted about by the Python suite, so a
     # lone edit there must not skip the lane that would catch a bad edit.
-    "cimd document → python + site": (
+    "cimd document → python": (
         ["website/static/oauth/client-metadata.json"],
-        _lanes(python=True, site=True),
+        _lanes(python=True),
     ),
     # A new docs page must reach llms.txt, and the generator that puts it there
     # has its own tests. Skipping Python on either is how the index drifted to
     # 53% coverage while every PR stayed green.
-    "docs page → python + site": (
+    "docs page → python": (
         ["website/docs/user-guide/bot-mode.md"],
-        _lanes(python=True, site=True),
+        _lanes(python=True),
     ),
-    "docs generator → python + site": (
+    "docs generator → python": (
         ["website/scripts/generate-llms-txt.py"],
-        _lanes(python=True, scan=True, site=True),
+        _lanes(python=True, scan=True),
     ),
     # SKILL.md reads like docs, but the skill-doc tests read skills/, so a
     # skill edit must still run Python.
-    "skill md → python + site": (["skills/github/SKILL.md"], _lanes(python=True, site=True)),
+    "skill md → python": (["skills/github/SKILL.md"], _lanes(python=True)),
     "dockerfile → docker meta": (["Dockerfile"], _lanes(docker_meta=True)),
     # Only the flake reads these, so they run nix alone. No Python test opens
     # them, unlike pyproject.toml and uv.lock below.
