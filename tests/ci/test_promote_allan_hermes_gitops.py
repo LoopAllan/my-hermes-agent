@@ -39,10 +39,12 @@ def test_pin_digest_requires_the_gitops_profile_to_exist(tmp_path):
         promotion.pin_digest(tmp_path / "missing.yaml", "sha256:" + "a" * 64)
 
 
-def test_workflow_runs_promotion_script_in_the_tested_image():
+def test_workflow_binds_gitops_secret_to_main_only_promotion_job():
     workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "allan-hermes-agent-image.yml").read_text(encoding="utf-8")
 
-    assert '"$TEST_IMAGE" \\\n            python3 /tmp/promote_allan_hermes_gitops.py' in workflow
+    assert '  promote-gitops:\n    if: github.event_name == \'push\' && github.ref == \'refs/heads/main\'\n    needs: build-test-and-publish\n    runs-on: ubuntu-latest\n    timeout-minutes: 15\n    environment: ALLAN_APPS_GITOPS_TOKEN' in workflow
+    assert '      - name: Pull published image\n        run: docker pull "$IMAGE_NAME:${GITHUB_SHA}"' in workflow
+    assert '"$IMAGE_NAME:${GITHUB_SHA}" \\\n            python3 /tmp/promote_allan_hermes_gitops.py' in workflow
 
 
 @pytest.mark.parametrize(
