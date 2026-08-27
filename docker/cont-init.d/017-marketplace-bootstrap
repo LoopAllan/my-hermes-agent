@@ -1,0 +1,7 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# Runs after 015-supervise-perms and before 02-reconcile-profiles by lexical
+# cont-init.d ordering. The bootstrap itself must execute as the runtime user.
+
+set -eu
+exec s6-setuidgid hermes /opt/hermes/docker/marketplace-bootstrap.sh
