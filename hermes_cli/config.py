@@ -2185,7 +2185,9 @@ DEFAULT_CONFIG = {
         # Optional in-process fast-forward updater for one trusted external Git checkout.
         "marketplace": {
             "enabled": False,
+            "repository": "",
             "repo_dir": "",
+            "skills_path": "plugins/skills",
             "remote": "origin",
             "branch": "main",
             "interval_seconds": 300,
