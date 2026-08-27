@@ -11,7 +11,9 @@ permissions:
   packages: write
 
 concurrency:
-  group: allan-hermes-agent-${{ github.event.workflow_run.head_sha || github.ref }}
+  # fork-ghcr serializes main pushes; this serializes their dependent releases
+  # so an older completion cannot overwrite a newer derived image/GitOps pin.
+  group: allan-hermes-agent-main-release
   cancel-in-progress: false
 
 env:

@@ -50,6 +50,11 @@ def test_workflow_runs_after_successful_main_base_image_publish():
         "types": ["completed"],
     }
 
+    assert workflow["concurrency"] == {
+        "group": "allan-hermes-agent-main-release",
+        "cancel-in-progress": False,
+    }
+
     build_job = workflow["jobs"]["build-test-and-publish"]
     assert "workflow_run.conclusion == 'success'" in build_job["if"]
     assert "workflow_run.event == 'push'" in build_job["if"]
