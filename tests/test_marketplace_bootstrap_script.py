@@ -34,15 +34,12 @@ def _run_script(
         "#!/bin/sh\n"
         "set -eu\n"
         "printf '%s\\n' \"$*\" >> \"$GIT_LOG\"\n"
-        "for arg in \"$@\"; do\n"
-        "  case \"$arg\" in *--file=*) credentials=${arg##*--file=} ;; esac\n"
-        "done\n"
-        "if [ -n \"${credentials:-}\" ]; then\n"
-        "  stat -c '%a' \"$credentials\" > \"$CREDENTIAL_MODE\"\n"
-        "  test -s \"$credentials\"\n"
-        "  cat \"$credentials\" > \"$CREDENTIAL_CONTENT\"\n"
-        "  printf '%s' \"$credentials\" > \"$CREDENTIAL_PATH\"\n"
-        "fi\n"
+        "test \"$GIT_TERMINAL_PROMPT\" = 0\n"
+        "stat -c '%a' \"$GIT_ASKPASS\" > \"$CREDENTIAL_MODE\"\n"
+        "test -s \"$GIT_ASKPASS\"\n"
+        "cat \"$GIT_ASKPASS\" > \"$CREDENTIAL_CONTENT\"\n"
+        "printf '%s' \"$GIT_ASKPASS\" > \"$CREDENTIAL_PATH\"\n"
+        "printf '%s' \"$MARKETPLACE_GIT_AUTH_TOKEN\" > \"$CHILD_TOKEN\"\n"
         "for last; do :; done\n"
         "mkdir -p \"$last/$FAKE_SKILLS_PATH\"\n"
         "case \"$FAKE_SOUL_MODE\" in\n"
@@ -88,6 +85,7 @@ def _run_script(
         "CREDENTIAL_MODE": str(tmp_path / "credential-mode"),
         "CREDENTIAL_CONTENT": str(tmp_path / "credential-content"),
         "CREDENTIAL_PATH": str(tmp_path / "credential-path"),
+        "CHILD_TOKEN": str(tmp_path / "child-token"),
         "FAKE_SKILLS_PATH": skills_path,
         "FAKE_SOUL": soul.decode("utf-8"),
         "FAKE_SOUL_MODE": soul_mode,
@@ -114,12 +112,15 @@ def test_bootstrap_clones_validates_and_atomically_installs_soul(tmp_path: Path)
     assert result.returncode == 0, result.stderr
     assert "super-secret-token" not in result.stdout + result.stderr
     git_args = (tmp_path / "git.log").read_text(encoding="utf-8")
-    assert "clone --depth 1 --single-branch --no-tags --branch main" in git_args
-    assert str(tmp_path / "hermes-home" / "marketplace" / "repository") in git_args
-    assert (tmp_path / "credential-mode").read_text(encoding="utf-8").strip() == "600"
-    assert (tmp_path / "credential-content").read_text(encoding="utf-8") == (
-        "https://x-access-token:super-secret-token@example.test/private/marketplace.git\n"
+    assert "clone --depth 1 --single-branch --no-tags --branch main --" in git_args
+    assert "/proc/self/fd/" in git_args
+    assert ".marketplace-clone-" in git_args
+    assert (tmp_path / "hermes-home" / "marketplace" / "repository").is_dir()
+    assert (tmp_path / "credential-mode").read_text(encoding="utf-8").strip() == "700"
+    assert "super-secret-token" not in (tmp_path / "credential-content").read_text(
+        encoding="utf-8"
     )
+    assert (tmp_path / "child-token").read_text(encoding="utf-8") == "super-secret-token"
     credential_path = Path((tmp_path / "credential-path").read_text(encoding="utf-8"))
     assert not credential_path.exists(), "temporary Git credential store was not removed"
     assert (tmp_path / "hermes-home" / "SOUL.md").read_text(encoding="utf-8") == "Marketplace soul\n"
@@ -194,8 +195,11 @@ def test_image_wires_hermes_hook_in_required_cont_init_order() -> None:
     """The image owns a hermes-user hook positioned after 015 and before 02."""
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     hook = HOOK.read_text(encoding="utf-8")
+    bootstrap = SCRIPT.read_text(encoding="utf-8")
 
     assert "COPY --chmod=0755 docker/marketplace-bootstrap.sh /opt/hermes/docker/marketplace-bootstrap.sh" in dockerfile
     assert "COPY --chmod=0755 docker/cont-init.d/017-marketplace-bootstrap /etc/cont-init.d/017-marketplace-bootstrap" in dockerfile
     assert "s6-setuidgid hermes /opt/hermes/docker/marketplace-bootstrap.sh" in hook
+    assert "exec python3 -m gateway.marketplace_bootstrap" in bootstrap
+    assert "<<" not in bootstrap
     assert dockerfile.index("COPY --chmod=0755 docker/cont-init.d/015-supervise-perms") < dockerfile.index("COPY --chmod=0755 docker/cont-init.d/017-marketplace-bootstrap") < dockerfile.index("COPY --chmod=0755 docker/cont-init.d/02-reconcile-profiles")

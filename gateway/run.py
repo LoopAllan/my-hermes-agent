@@ -9753,7 +9753,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         settings = marketplace_config(user_config)
         if not settings:
             return
-        interval = settings["interval_seconds"]
+        interval = settings.interval_seconds
         loop = asyncio.get_running_loop()
         while self._running:
             try:

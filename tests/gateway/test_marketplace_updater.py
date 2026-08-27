@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from gateway import marketplace_updater
+from gateway.marketplace_config import MarketplaceConfig
 
 
 def _config(repo: Path, **overrides):
@@ -40,9 +41,16 @@ def _repositories(tmp_path: Path):
 def test_marketplace_config_is_opt_in_and_validates_values():
     assert marketplace_updater.marketplace_config({"skills": {}}) is None
     assert marketplace_updater.marketplace_config({"skills": {"marketplace": {"enabled": True}}}) is None
-    assert marketplace_updater.marketplace_config(_config(Path("/tmp/marketplace"), interval_seconds=1)) == {
-        "repo_dir": "/tmp/marketplace", "remote": "origin", "branch": "main", "interval_seconds": 30,
-    }
+    assert marketplace_updater.marketplace_config(
+        _config(Path("/tmp/marketplace"), interval_seconds=1)
+    ) == MarketplaceConfig(
+        repository="",
+        repo_dir=Path("/tmp/marketplace"),
+        skills_path=Path("plugins/skills"),
+        remote="origin",
+        branch="main",
+        interval_seconds=30,
+    )
     assert marketplace_updater.marketplace_config(_config(Path("/tmp/repo"), remote="--upload-pack=bad")) is None
     assert marketplace_updater.marketplace_config(_config(Path("/tmp/repo"), interval_seconds="bad")) is None
 
