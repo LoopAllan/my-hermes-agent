@@ -130,3 +130,41 @@ def test_missing_token_and_fetch_failure_fail_closed(monkeypatch, tmp_path: Path
     assert not marketplace_updater.update_marketplace_worktree(_config(checkout))
     monkeypatch.setattr(marketplace_updater, "_fetch", lambda *args: (_ for _ in ()).throw(subprocess.TimeoutExpired("git", 30)))
     assert not marketplace_updater.update_marketplace_worktree(_config(checkout))
+
+
+def test_fetch_reads_token_from_vault_env_file_on_each_call(monkeypatch, tmp_path: Path):
+    """Gateway fetches use the rendered Vault file, not an inherited secret environment."""
+    vault = tmp_path / "vault.env"
+    vault.write_text("# rendered by Vault\nMARKETPLACE_GIT_AUTH_TOKEN=\"first-token\"\n", encoding="utf-8")
+    monkeypatch.setenv("MARKETPLACE_VAULT_ENV_FILE", str(vault))
+    monkeypatch.setenv("MARKETPLACE_GIT_AUTH_TOKEN", "stale-inherited-token")
+    seen_tokens = []
+
+    def fake_run(args, **kwargs):
+        seen_tokens.append(kwargs["env"]["MARKETPLACE_GIT_AUTH_TOKEN"])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(marketplace_updater.subprocess, "run", fake_run)
+    marketplace_updater._fetch(tmp_path, "origin", "main")
+    vault.write_text("MARKETPLACE_GIT_AUTH_TOKEN=\"second-token\"\n", encoding="utf-8")
+    marketplace_updater._fetch(tmp_path, "origin", "main")
+
+    assert seen_tokens == ["first-token", "second-token"]
+
+
+@pytest.mark.parametrize(
+    "vault_contents",
+    [
+        "MARKETPLACE_GIT_AUTH_TOKEN=$(touch should-not-run)\n",
+        "export MARKETPLACE_GIT_AUTH_TOKEN=token\n",
+        "MARKETPLACE_GIT_AUTH_TOKEN='quoted-token'\n",
+    ],
+)
+def test_fetch_rejects_vault_values_that_require_shell_evaluation(monkeypatch, tmp_path: Path, vault_contents: str):
+    vault = tmp_path / "vault.env"
+    vault.write_text(vault_contents, encoding="utf-8")
+    monkeypatch.setenv("MARKETPLACE_VAULT_ENV_FILE", str(vault))
+    monkeypatch.delenv("MARKETPLACE_GIT_AUTH_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="MARKETPLACE_GIT_AUTH_TOKEN"):
+        marketplace_updater._fetch(tmp_path, "origin", "main")

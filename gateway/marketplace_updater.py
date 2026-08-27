@@ -1,6 +1,7 @@
 """Safe in-process updater for a configured external-skills Git worktree."""
 from __future__ import annotations
 
+import ast
 import logging
 import os
 import subprocess
@@ -62,10 +63,32 @@ def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
     return result.returncode == 0
 
 
+def _marketplace_token_from_env_file() -> str:
+    env_file = os.environ.get("MARKETPLACE_VAULT_ENV_FILE")
+    if not env_file:
+        raise RuntimeError("MARKETPLACE_VAULT_ENV_FILE is unavailable")
+    try:
+        lines = Path(env_file).read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise RuntimeError("MARKETPLACE_VAULT_ENV_FILE is unreadable") from exc
+    prefix = "MARKETPLACE_GIT_AUTH_TOKEN="
+    for line in lines:
+        if line.startswith(prefix):
+            raw_token = line[len(prefix):]
+            if not raw_token.startswith('"'):
+                break
+            try:
+                token = ast.literal_eval(raw_token)
+            except (SyntaxError, ValueError):
+                break
+            if isinstance(token, str) and token and "\n" not in token and "\r" not in token:
+                return token
+            break
+    raise RuntimeError("MARKETPLACE_GIT_AUTH_TOKEN is unavailable")
+
+
 def _fetch(repo: Path, remote: str, branch: str) -> None:
-    token = os.environ.get("MARKETPLACE_GIT_AUTH_TOKEN")
-    if not token:
-        raise RuntimeError("MARKETPLACE_GIT_AUTH_TOKEN is unavailable")
+    token = _marketplace_token_from_env_file()
     with tempfile.TemporaryDirectory(prefix="hermes-marketplace-") as directory:
         askpass = Path(directory) / "askpass"
         askpass.write_text(
@@ -74,7 +97,11 @@ def _fetch(repo: Path, remote: str, branch: str) -> None:
         )
         askpass.chmod(0o700)
         env = os.environ.copy()
-        env.update({"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": str(askpass)})
+        env.update({
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_ASKPASS": str(askpass),
+            "MARKETPLACE_GIT_AUTH_TOKEN": token,
+        })
         subprocess.run(["git", "-C", str(repo), "fetch", "--no-tags", remote, branch],
                        text=True, capture_output=True, timeout=30, check=True, env=env)
 
