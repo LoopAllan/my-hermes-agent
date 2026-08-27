@@ -1,8 +1,9 @@
 name: Build Allan Hermes Agent Image
 
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: [Publish Fork Image to GHCR]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -10,21 +11,29 @@ permissions:
   packages: write
 
 concurrency:
-  group: allan-hermes-agent-${{ github.ref }}
+  group: allan-hermes-agent-${{ github.event.workflow_run.head_sha || github.ref }}
   cancel-in-progress: false
 
 env:
   IMAGE_NAME: ghcr.io/loopallan/allan-hermes-agent
   TEST_IMAGE: allan-hermes-agent:test
+  SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
   build-test-and-publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       # This repository deliberately tracks maintained major action releases.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -41,13 +50,14 @@ jobs:
           cache-to: type=gha,mode=max,scope=allan-hermes-agent
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
+          build-args: BASE_IMAGE=ghcr.io/loopallan/my-hermes-agent:${{ env.SOURCE_SHA }}
 
       - name: Verify installed tools
         run: docker run --rm ${{ env.TEST_IMAGE }} jq --version
 
       - name: Log in to GitHub Container Registry
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'workflow_run'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -55,16 +65,16 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish tested image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'workflow_run'
         run: |
           set -euo pipefail
-          docker tag "$TEST_IMAGE" "$IMAGE_NAME:${GITHUB_SHA}"
+          docker tag "$TEST_IMAGE" "$IMAGE_NAME:${SOURCE_SHA}"
           docker tag "$TEST_IMAGE" "$IMAGE_NAME:main"
-          docker push "$IMAGE_NAME:${GITHUB_SHA}"
+          docker push "$IMAGE_NAME:${SOURCE_SHA}"
           docker push "$IMAGE_NAME:main"
 
   promote-gitops:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_run'
     needs: build-test-and-publish
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -72,6 +82,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -84,7 +96,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull published image
-        run: docker pull "$IMAGE_NAME:${GITHUB_SHA}"
+        run: docker pull "$IMAGE_NAME:${SOURCE_SHA}"
 
       - name: Promote immutable image digest to Allan GitOps
         env:
@@ -98,7 +110,7 @@ jobs:
             exit 1
           }
 
-          digest="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$IMAGE_NAME:${GITHUB_SHA}")"
+          digest="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$IMAGE_NAME:${SOURCE_SHA}")"
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
             echo "invalid published image digest: $digest" >&2
             exit 1
@@ -126,7 +138,7 @@ jobs:
           docker run --rm --entrypoint python3 --user "$(id -u):$(id -g)" \
             -v "$PWD:/gitops" \
             -v "$GITHUB_WORKSPACE/.github/scripts/promote_allan_hermes_gitops.py:/tmp/promote_allan_hermes_gitops.py:ro" \
-            "$IMAGE_NAME:${GITHUB_SHA}" \
+            "$IMAGE_NAME:${SOURCE_SHA}" \
               /tmp/promote_allan_hermes_gitops.py \
               --profile "/gitops/$GITOPS_PROFILE" \
               --digest "$digest"
@@ -139,5 +151,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$GITOPS_PROFILE"
           git diff --cached --check
-          git commit -m "chore(hermes): promote allan image ${GITHUB_SHA}"
+          git commit -m "chore(hermes): promote allan image ${SOURCE_SHA}"
           git push origin HEAD:main
