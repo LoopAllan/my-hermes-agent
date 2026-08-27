@@ -40,19 +40,39 @@ def test_pin_digest_requires_the_gitops_profile_to_exist(tmp_path):
         promotion.pin_digest(tmp_path / "missing.yaml", "sha256:" + "a" * 64)
 
 
-def test_workflow_binds_gitops_secret_to_main_only_promotion_job():
+def test_workflow_runs_after_successful_main_base_image_publish():
     workflow_path = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "allan-hermes-agent-image.yml"
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-    promotion_job = workflow["jobs"]["promote-gitops"]
+    triggers = workflow[True]
+    assert "push" not in triggers
+    assert triggers["workflow_run"] == {
+        "workflows": ["Publish Fork Image to GHCR"],
+        "types": ["completed"],
+    }
 
-    assert promotion_job["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    assert workflow["concurrency"] == {
+        "group": "allan-hermes-agent-main-release",
+        "cancel-in-progress": False,
+    }
+
+    build_job = workflow["jobs"]["build-test-and-publish"]
+    assert "workflow_run.conclusion == 'success'" in build_job["if"]
+    assert "workflow_run.event == 'push'" in build_job["if"]
+    assert "workflow_run.head_branch == 'main'" in build_job["if"]
+    checkout = next(step for step in build_job["steps"] if step["name"] == "Checkout")
+    assert checkout["with"]["ref"] == "${{ env.SOURCE_SHA }}"
+    candidate = next(step for step in build_job["steps"] if step["name"] == "Build candidate image")
+    assert candidate["with"]["build-args"] == "BASE_IMAGE=ghcr.io/loopallan/my-hermes-agent:${{ env.SOURCE_SHA }}"
+
+    promotion_job = workflow["jobs"]["promote-gitops"]
+    assert promotion_job["if"] == "github.event_name == 'workflow_run'"
     assert promotion_job["needs"] == "build-test-and-publish"
     assert promotion_job["environment"] == "ALLAN_APPS_GITOPS_TOKEN"
     pull_step = next(step for step in promotion_job["steps"] if step["name"] == "Pull published image")
-    assert pull_step["run"] == 'docker pull "$IMAGE_NAME:${GITHUB_SHA}"'
+    assert pull_step["run"] == 'docker pull "$IMAGE_NAME:${SOURCE_SHA}"'
     promotion_step = next(step for step in promotion_job["steps"] if step["name"] == "Promote immutable image digest to Allan GitOps")
     assert 'docker run --rm --entrypoint python3 --user "$(id -u):$(id -g)"' in promotion_step["run"]
-    assert '"$IMAGE_NAME:${GITHUB_SHA}" \\\n    /tmp/promote_allan_hermes_gitops.py' in promotion_step["run"]
+    assert '"$IMAGE_NAME:${SOURCE_SHA}" \\\n    /tmp/promote_allan_hermes_gitops.py' in promotion_step["run"]
 
 
 @pytest.mark.parametrize(
