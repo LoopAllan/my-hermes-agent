@@ -200,6 +200,8 @@ def test_image_wires_hermes_hook_in_required_cont_init_order() -> None:
     assert "COPY --chmod=0755 docker/marketplace-bootstrap.sh /opt/hermes/docker/marketplace-bootstrap.sh" in dockerfile
     assert "COPY --chmod=0755 docker/cont-init.d/017-marketplace-bootstrap /etc/cont-init.d/017-marketplace-bootstrap" in dockerfile
     assert "s6-setuidgid hermes /opt/hermes/docker/marketplace-bootstrap.sh" in hook
-    assert "exec python3 -m gateway.marketplace_bootstrap" in bootstrap
+    assert 'if [ -x /opt/hermes/.venv/bin/python ]; then' in bootstrap
+    assert 'exec /opt/hermes/.venv/bin/python -m gateway.marketplace_bootstrap "$@"' in bootstrap
+    assert 'exec python3 -m gateway.marketplace_bootstrap "$@"' in bootstrap
     assert "<<" not in bootstrap
     assert dockerfile.index("COPY --chmod=0755 docker/cont-init.d/015-supervise-perms") < dockerfile.index("COPY --chmod=0755 docker/cont-init.d/017-marketplace-bootstrap") < dockerfile.index("COPY --chmod=0755 docker/cont-init.d/02-reconcile-profiles")
