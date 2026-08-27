@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import yaml
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "docker" / "marketplace-bootstrap.sh"
@@ -20,6 +22,7 @@ def _run_script(
     skills_path: str = "skills",
     soul_mode: str = "regular",
     mount_mode: str = "directory",
+    marketplace_overrides: dict[str, object] | None = None,
     extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the real script against real temporary directories and a fake git binary."""
@@ -51,7 +54,7 @@ def _run_script(
     fake_git.chmod(0o755)
 
     vault = tmp_path / "vault.env"
-    vault.write_text("MARKETPLACE_GIT_AUTH_TOKEN=super-secret-token\n", encoding="utf-8")
+    vault.write_text("MARKETPLACE_GIT_AUTH_TOKEN=\"super-secret-token\"\n", encoding="utf-8")
     home = tmp_path / "hermes-home"
     home.mkdir()
     mount = home / "marketplace"
@@ -65,14 +68,21 @@ def _run_script(
     else:
         raise ValueError(f"unsupported mount mode: {mount_mode}")
     (home / "SOUL.md").write_text("old soul\n", encoding="utf-8")
+    marketplace = {
+        "enabled": enabled == "true",
+        "repository": "https://example.test/private/marketplace.git",
+        "repo_dir": str(mount / "repository"),
+        "skills_path": skills_path,
+        "branch": "main",
+    }
+    if marketplace_overrides:
+        marketplace.update(marketplace_overrides)
+    (home / "config.yaml").write_text(
+        yaml.safe_dump({"skills": {"marketplace": marketplace}}), encoding="utf-8"
+    )
     env = os.environ | {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "MARKETPLACE_BOOTSTRAP_ENABLED": enabled,
         "MARKETPLACE_VAULT_ENV_FILE": str(vault),
-        "MARKETPLACE_REPOSITORY": "https://example.test/private/marketplace.git",
-        "MARKETPLACE_REF": "main",
-        "MARKETPLACE_MOUNT_PATH": str(mount),
-        "MARKETPLACE_SKILLS_PATH": skills_path,
         "HERMES_HOME": str(home),
         "GIT_LOG": str(tmp_path / "git.log"),
         "CREDENTIAL_MODE": str(tmp_path / "credential-mode"),
@@ -115,6 +125,27 @@ def test_bootstrap_clones_validates_and_atomically_installs_soul(tmp_path: Path)
     assert (tmp_path / "hermes-home" / "SOUL.md").read_text(encoding="utf-8") == "Marketplace soul\n"
 
 
+def test_bootstrap_uses_marketplace_config_instead_of_behavior_environment(tmp_path: Path) -> None:
+    """Nonsecret bootstrap settings come only from config.yaml, never raw environment."""
+    result = _run_script(
+        tmp_path,
+        extra_env={
+            "MARKETPLACE_BOOTSTRAP_ENABLED": "false",
+            "MARKETPLACE_REPOSITORY": "https://invalid.test/ignored.git",
+            "MARKETPLACE_REF": "ignored",
+            "MARKETPLACE_MOUNT_PATH": str(tmp_path / "outside"),
+            "MARKETPLACE_SKILLS_PATH": "ignored",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    git_args = (tmp_path / "git.log").read_text(encoding="utf-8")
+    assert "https://example.test/private/marketplace.git" in git_args
+    assert "--branch main" in git_args
+    assert "invalid.test" not in git_args
+    assert "ignored" not in git_args
+
+
 def test_bootstrap_rejects_invalid_root_soul_without_replacing_existing_identity(tmp_path: Path) -> None:
     """Symlinked and oversized root SOUL files never replace the existing identity."""
     for name, kwargs in {
@@ -139,9 +170,9 @@ def test_bootstrap_rejects_marketplace_mount_escapes(tmp_path: Path) -> None:
     traversal_sentinel.write_text("preserve", encoding="utf-8")
     traversal_result = _run_script(
         traversal_case,
-        extra_env={
-            "MARKETPLACE_MOUNT_PATH": str(
-                traversal_case / "hermes-home" / "marketplace" / ".." / ".." / "outside-marketplace"
+        marketplace_overrides={
+            "repo_dir": str(
+                traversal_case / "hermes-home" / "marketplace" / ".." / ".." / "outside-marketplace" / "repository"
             )
         },
     )
