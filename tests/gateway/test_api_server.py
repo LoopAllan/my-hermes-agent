@@ -28,8 +28,10 @@ from gateway.config import GatewayConfig, Platform, PlatformConfig
 from gateway.platforms.api_server import (
     APIServerAdapter,
     ResponseStore,
+    _response_format_system_instruction,
     _IdempotencyCache,
     _derive_chat_session_id,
+    _make_request_fingerprint,
     _redact_api_error_text,
     check_api_server_requirements,
     cors_middleware,
@@ -77,6 +79,55 @@ class TestRedactApiErrorText:
 
     def test_clean_text_passes_through_unchanged(self):
         assert _redact_api_error_text("Job not found") == "Job not found"
+
+
+# ---------------------------------------------------------------------------
+# response_format
+# ---------------------------------------------------------------------------
+
+
+def test_json_schema_response_format_adds_an_unambiguous_system_instruction():
+    instruction = _response_format_system_instruction({
+        "type": "json_schema",
+        "json_schema": {
+            "name": "caption_leads",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {"leads": {"type": "array"}},
+                "required": ["leads"],
+            },
+        },
+    })
+
+    assert "single JSON object" in instruction
+    assert "caption_leads" in instruction
+    assert '"required":["leads"]' in instruction
+
+
+def test_rejects_malformed_or_unsupported_response_format():
+    with pytest.raises(ValueError, match="json_schema"):
+        _response_format_system_instruction({"type": "json_schema"})
+
+    with pytest.raises(ValueError, match="Unsupported response_format"):
+        _response_format_system_instruction({"type": "xml"})
+
+
+def test_response_format_changes_idempotency_fingerprint():
+    base = {"model": "toss-box", "messages": [{"role": "user", "content": "caption"}]}
+    schema_a = {**base, "response_format": {"type": "json_object"}}
+    schema_b = {
+        **base,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "lead", "schema": {"type": "object"}},
+        },
+    }
+    keys = ["model", "messages", "tools", "tool_choice", "response_format", "stream"]
+
+    assert _make_request_fingerprint(schema_a, keys=keys) != _make_request_fingerprint(
+        schema_b, keys=keys
+    )
 
 
 # ---------------------------------------------------------------------------

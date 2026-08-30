@@ -93,6 +93,49 @@ MAX_REQUEST_BYTES = 10_000_000  # 10 MB — accommodates long agent conversation
 CHAT_COMPLETIONS_SSE_KEEPALIVE_SECONDS = 30.0
 MAX_NORMALIZED_TEXT_LENGTH = 65_536  # 64 KB cap for normalized content parts
 MAX_CONTENT_LIST_SIZE = 1_000  # Max items when content is an array
+MAX_RESPONSE_FORMAT_SCHEMA_BYTES = 65_536
+
+
+def _response_format_system_instruction(response_format: Any) -> str:
+    """Translate supported OpenAI ``response_format`` values into an agent instruction.
+
+    Hermes executes its own server-side agent rather than proxying a single
+    provider request, so response constraints must be applied at the agent
+    boundary.  Invalid or unsupported formats are rejected rather than silently
+    ignored, which keeps OpenAI-compatible callers from mistaking a best-effort
+    text response for structured output.
+    """
+    if response_format is None:
+        return ""
+    if not isinstance(response_format, dict):
+        raise ValueError("response_format must be an object")
+
+    response_type = response_format.get("type")
+    if response_type == "json_object":
+        return "Respond with a single valid JSON object. Do not include prose or markdown fences."
+    if response_type != "json_schema":
+        raise ValueError("Unsupported response_format type")
+
+    json_schema = response_format.get("json_schema")
+    if not isinstance(json_schema, dict):
+        raise ValueError("response_format.json_schema must be an object")
+    name = json_schema.get("name")
+    schema = json_schema.get("schema")
+    if not isinstance(name, str) or not name.strip() or not isinstance(schema, dict):
+        raise ValueError("response_format.json_schema requires non-empty name and object schema")
+
+    try:
+        serialized_schema = json.dumps(schema, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("response_format.json_schema.schema must be JSON serializable") from exc
+    if len(serialized_schema.encode("utf-8")) > MAX_RESPONSE_FORMAT_SCHEMA_BYTES:
+        raise ValueError("response_format.json_schema.schema is too large")
+
+    return (
+        "Respond with a single JSON object that is valid and conforms to the requested JSON Schema. "
+        "Do not include prose or markdown fences. "
+        f"Schema name: {name.strip()}. Schema: {serialized_schema}"
+    )
 
 
 def _coerce_port(value: Any, default: int = DEFAULT_PORT) -> int:
@@ -1856,6 +1899,16 @@ class APIServerAdapter(BasePlatformAdapter):
 
         stream = _coerce_request_bool(body.get("stream"), default=False)
 
+        try:
+            response_format_instruction = _response_format_system_instruction(
+                body.get("response_format")
+            )
+        except ValueError as exc:
+            return web.json_response(
+                _openai_error(str(exc), err_type="invalid_request_error", param="response_format"),
+                status=400,
+            )
+
         # Extract system message (becomes ephemeral system prompt layered ON TOP of core)
         system_prompt = None
         conversation_messages: List[Dict[str, str]] = []
@@ -1877,6 +1930,11 @@ class APIServerAdapter(BasePlatformAdapter):
                 except ValueError as exc:
                     return _multimodal_validation_error(exc, param=f"messages[{idx}].content")
                 conversation_messages.append({"role": role, "content": content})
+
+        if response_format_instruction:
+            system_prompt = "\n".join(
+                part for part in (system_prompt, response_format_instruction) if part
+            )
 
         # Extract the last user message as the primary input
         user_message: Any = ""
@@ -2068,7 +2126,10 @@ class APIServerAdapter(BasePlatformAdapter):
 
         idempotency_key = request.headers.get("Idempotency-Key")
         if idempotency_key:
-            fp = _make_request_fingerprint(body, keys=["model", "messages", "tools", "tool_choice", "stream"])
+            fp = _make_request_fingerprint(
+                body,
+                keys=["model", "messages", "tools", "tool_choice", "response_format", "stream"],
+            )
             try:
                 result, usage = await _idem_cache.get_or_set(idempotency_key, fp, _compute_completion)
             except Exception as e:
