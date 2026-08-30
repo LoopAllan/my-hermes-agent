@@ -94,6 +94,7 @@ CHAT_COMPLETIONS_SSE_KEEPALIVE_SECONDS = 30.0
 MAX_NORMALIZED_TEXT_LENGTH = 65_536  # 64 KB cap for normalized content parts
 MAX_CONTENT_LIST_SIZE = 1_000  # Max items when content is an array
 MAX_RESPONSE_FORMAT_SCHEMA_BYTES = 65_536
+MAX_RESPONSE_FORMAT_NAME_LENGTH = 64
 
 
 def _response_format_system_instruction(response_format: Any) -> str:
@@ -111,6 +112,8 @@ def _response_format_system_instruction(response_format: Any) -> str:
         raise ValueError("response_format must be an object")
 
     response_type = response_format.get("type")
+    if response_type == "text":
+        return ""
     if response_type == "json_object":
         return "Respond with a single valid JSON object. Do not include prose or markdown fences."
     if response_type != "json_schema":
@@ -123,6 +126,11 @@ def _response_format_system_instruction(response_format: Any) -> str:
     schema = json_schema.get("schema")
     if not isinstance(name, str) or not name.strip() or not isinstance(schema, dict):
         raise ValueError("response_format.json_schema requires non-empty name and object schema")
+    normalized_name = name.strip()
+    if len(normalized_name) > MAX_RESPONSE_FORMAT_NAME_LENGTH:
+        raise ValueError("response_format.json_schema.name is too long")
+    if re.fullmatch(r"[A-Za-z0-9_-]+", normalized_name) is None:
+        raise ValueError("response_format.json_schema.name contains invalid characters")
 
     try:
         serialized_schema = json.dumps(schema, separators=(",", ":"), ensure_ascii=False)
@@ -134,7 +142,7 @@ def _response_format_system_instruction(response_format: Any) -> str:
     return (
         "Respond with a single JSON object that is valid and conforms to the requested JSON Schema. "
         "Do not include prose or markdown fences. "
-        f"Schema name: {name.strip()}. Schema: {serialized_schema}"
+        f"Schema name: {normalized_name}. Schema: {serialized_schema}"
     )
 
 
@@ -1931,6 +1939,9 @@ class APIServerAdapter(BasePlatformAdapter):
                     return _multimodal_validation_error(exc, param=f"messages[{idx}].content")
                 conversation_messages.append({"role": role, "content": content})
 
+        # Response formatting is request-scoped and must not rotate the stable
+        # conversation identity when a client changes formats between turns.
+        session_identity_system_prompt = system_prompt
         if response_format_instruction:
             system_prompt = "\n".join(
                 part for part in (system_prompt, response_format_instruction) if part
@@ -2014,7 +2025,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 if cm.get("role") == "user":
                     first_user = cm.get("content", "")
                     break
-            session_id = _derive_chat_session_id(system_prompt, first_user)
+            session_id = _derive_chat_session_id(session_identity_system_prompt, first_user)
             # history already set from request body above
 
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
