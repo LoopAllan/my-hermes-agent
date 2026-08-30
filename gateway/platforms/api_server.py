@@ -133,7 +133,9 @@ def _response_format_system_instruction(response_format: Any) -> str:
         raise ValueError("response_format.json_schema.name contains invalid characters")
 
     try:
-        serialized_schema = json.dumps(schema, separators=(",", ":"), ensure_ascii=False)
+        serialized_schema = json.dumps(
+            schema, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+        )
     except (TypeError, ValueError) as exc:
         raise ValueError("response_format.json_schema.schema must be JSON serializable") from exc
     if len(serialized_schema.encode("utf-8")) > MAX_RESPONSE_FORMAT_SCHEMA_BYTES:
@@ -1939,13 +1941,9 @@ class APIServerAdapter(BasePlatformAdapter):
                     return _multimodal_validation_error(exc, param=f"messages[{idx}].content")
                 conversation_messages.append({"role": role, "content": content})
 
-        # Response formatting is request-scoped and must not rotate the stable
-        # conversation identity when a client changes formats between turns.
-        session_identity_system_prompt = system_prompt
-        if response_format_instruction:
-            system_prompt = "\n".join(
-                part for part in (system_prompt, response_format_instruction) if part
-            )
+        # Response formatting is request-scoped. It is appended to the current
+        # user turn below rather than the system prompt, preserving the
+        # cacheable system prefix for the life of a conversation.
 
         # Extract the last user message as the primary input
         user_message: Any = ""
@@ -1959,6 +1957,8 @@ class APIServerAdapter(BasePlatformAdapter):
                 {"error": {"message": "No user message found in messages", "type": "invalid_request_error"}},
                 status=400,
             )
+        if response_format_instruction:
+            user_message = f"{user_message}\n\n{response_format_instruction}"
 
         # Allow caller to scope long-term memory (e.g. Honcho) with a
         # stable per-channel identifier via X-Hermes-Session-Key.  This
@@ -2025,7 +2025,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 if cm.get("role") == "user":
                     first_user = cm.get("content", "")
                     break
-            session_id = _derive_chat_session_id(session_identity_system_prompt, first_user)
+            session_id = _derive_chat_session_id(system_prompt, first_user)
             # history already set from request body above
 
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"

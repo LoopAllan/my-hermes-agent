@@ -135,6 +135,15 @@ def test_rejects_malformed_or_unsupported_response_format():
         })
 
 
+def test_response_format_rejects_non_finite_schema_values():
+    for value in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="JSON serializable"):
+            _response_format_system_instruction({
+                "type": "json_schema",
+                "json_schema": {"name": "lead", "schema": {"const": value}},
+            })
+
+
 def test_response_format_changes_idempotency_fingerprint():
     base = {"model": "toss-box", "messages": [{"role": "user", "content": "caption"}]}
     schema_a = {**base, "response_format": {"type": "json_object"}}
@@ -1203,6 +1212,36 @@ class TestChatCompletionsEndpoint:
         assert object_response.headers["X-Hermes-Session-Id"] == schema_response.headers[
             "X-Hermes-Session-Id"
         ]
+        first_call, second_call = mock_run.call_args_list
+        assert first_call.kwargs["ephemeral_system_prompt"] == "Extract caption leads."
+        assert second_call.kwargs["ephemeral_system_prompt"] == "Extract caption leads."
+        assert "single valid JSON object" in first_call.kwargs["user_message"]
+        assert "requested JSON Schema" in second_call.kwargs["user_message"]
+
+    @pytest.mark.asyncio
+    async def test_non_finite_response_format_schema_returns_400(self, adapter):
+        app = _create_app(adapter)
+        body = {
+            "model": "test",
+            "messages": [{"role": "user", "content": "caption"}],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "lead", "schema": {"const": float("nan")}},
+            },
+        }
+
+        async with TestClient(TestServer(app)) as cli:
+            with patch.object(adapter, "_run_agent", new_callable=AsyncMock) as mock_run:
+                response = await cli.post(
+                    "/v1/chat/completions",
+                    data=json.dumps(body),
+                    headers={"Content-Type": "application/json"},
+                )
+                assert response.status == 400
+                response_body = await response.json()
+
+        assert response_body["error"]["param"] == "response_format"
+        mock_run.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_stream_true_returns_sse(self, adapter):

@@ -106,7 +106,7 @@ Standard OpenAI Chat Completions format. Stateless — the full conversation is 
 
 Uploaded files (`file` / `input_file` / `file_id`) and non-image `data:` URLs return `400 unsupported_content_type`.
 
-**Structured JSON:** Chat Completions accepts OpenAI-compatible `response_format` values of `text`, `json_object`, and `json_schema`. `text` preserves the ordinary response behavior. For JSON formats, Hermes adds the requested JSON constraint to the server-side agent prompt and rejects malformed or unsupported `response_format` values with `400`; clients must still validate returned JSON against their own schema before persistence.
+**Structured JSON:** Chat Completions accepts OpenAI-compatible `response_format` values of `text`, `json_object`, and `json_schema`. `text` preserves the ordinary response behavior. For JSON formats, Hermes appends the requested constraint to the current agent turn without changing the cacheable system prompt, and rejects malformed or unsupported `response_format` values with `400`; clients must still validate returned JSON against their own schema before persistence.
 
 **Streaming** (`"stream": true`): Returns Server-Sent Events (SSE) with token-by-token response chunks. For **Chat Completions**, the stream uses standard `chat.completion.chunk` events plus Hermes' custom `hermes.tool.progress` event for tool-start UX. For **Responses**, the stream uses OpenAI Responses event types such as `response.created`, `response.output_text.delta`, `response.output_item.added`, `response.output_item.done`, and `response.completed`.
 
