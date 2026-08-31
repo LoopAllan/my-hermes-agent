@@ -105,12 +105,30 @@ def load_marketplace_config(
 def load_marketplace_config_file(
     hermes_home: Path, *, require_bootstrap: bool = False
 ) -> MarketplaceConfig | None:
-    """Read marketplace settings from ``HERMES_HOME/config.yaml`` only."""
+    """Read marketplace settings from ``HERMES_HOME/config.yaml`` only.
+
+    Goes through ``read_user_config_raw`` rather than a bare ``yaml.safe_load``:
+    it is the canonical primitive for reading one user ``config.yaml`` exactly
+    as written, and raw reads outside the loader-owning modules are rejected by
+    ``tests/hermes_cli/test_config_read_guard.py``. The unmerged semantics this
+    function documents are preserved — no DEFAULT_CONFIG merge, no managed
+    overlay, no ``${ENV_VAR}`` expansion.
+
+    A missing file is checked explicitly, because the primitive reports it as
+    ``{}`` and this function's callers need it to fail loudly. A root that is
+    not a mapping likewise reads as ``{}`` rather than raising here; it still
+    fails whenever the caller passes ``require_bootstrap=True``, since an empty
+    mapping has no repository.
+    """
+    from hermes_cli.config import read_user_config_raw
+
     config_path = hermes_home / "config.yaml"
+    if not config_path.is_file():
+        raise MarketplaceConfigError(
+            f"cannot read config.yaml: {config_path} is not a readable file"
+        )
     try:
-        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        config = read_user_config_raw(config_path)
     except (OSError, yaml.YAMLError) as exc:
         raise MarketplaceConfigError(f"cannot read config.yaml: {exc}") from exc
-    if not isinstance(config, Mapping):
-        raise MarketplaceConfigError("config.yaml must contain a mapping")
     return load_marketplace_config(config, require_bootstrap=require_bootstrap)

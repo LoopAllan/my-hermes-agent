@@ -525,7 +525,9 @@ export const api = {
   // whichever managed profile is currently selected.  Explicit `current`
   // bypasses fetchJSON's automatic profile query injection.
   getDashboardConfig: () =>
-    fetchJSON<Record<string, unknown>>("/api/config?profile=current"),
+    fetchJSON<Record<string, unknown>>(
+      appendProfileParam("/api/config", "current"),
+    ),
   getDefaults: () => fetchJSON<Record<string, unknown>>("/api/config/defaults"),
   getSchema: () => fetchJSON<{ fields: Record<string, unknown>; category_order: string[] }>("/api/config/schema"),
   getModelInfo: (profile = getManagementProfile()) =>

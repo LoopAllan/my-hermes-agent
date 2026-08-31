@@ -473,7 +473,8 @@ class GatewayAuthorizationMixin:
         # while their profile must explicitly enable the sender-independent
         # policy.
         chat_allowlist_env = ""
-        if source.chat_type in {"group", "forum", "channel"}:
+        is_group_chat = source.chat_type in {"group", "forum", "channel"}
+        if is_group_chat:
             chat_allowlist_env = {
                 Platform.TELEGRAM: "TELEGRAM_GROUP_ALLOWED_CHATS",
                 Platform.QQBOT: "QQ_GROUP_ALLOWED_USERS",
@@ -494,7 +495,7 @@ class GatewayAuthorizationMixin:
                 if "*" in allowed_chat_ids or source.chat_id in allowed_chat_ids:
                     return True
 
-        if source.chat_type in {"group", "forum", "channel"} and source.chat_id:
+        if is_group_chat and source.chat_id:
             # Fallback: also check adapter-level config (config.yaml)
             # for platforms.<platform>.extra.group_allowed_chats.
             # The Telegram observe-unmentioned mode strips user_id from

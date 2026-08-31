@@ -503,6 +503,12 @@ def _message_mentions_user(message: Dict[str, Any], user_id: Optional[str]) -> b
     )
 
 
+# Message types whose binary is fetched and cached. Shared by the text
+# summary (which emits the ``[image]``-style placeholder) and the inbound
+# handler (which performs the download) so the two cannot drift apart.
+_MEDIA_MESSAGE_TYPES = {"image", "audio", "video", "file"}
+
+
 def _message_text_summary(msg: Dict[str, Any]) -> str:
     """Human-readable text for a LINE inbound message, independent of any media
     download. Shared by the normal message handler and the unmentioned-archive
@@ -510,7 +516,7 @@ def _message_text_summary(msg: Dict[str, Any]) -> str:
     msg_type = (msg or {}).get("type", "")
     if msg_type == "text":
         return msg.get("text", "") or ""
-    if msg_type in {"image", "audio", "video", "file"}:
+    if msg_type in _MEDIA_MESSAGE_TYPES:
         return f"[{msg_type}]"
     if msg_type == "sticker":
         keywords = msg.get("keywords") or []
@@ -1113,7 +1119,7 @@ class LineAdapter(BasePlatformAdapter):
         # summary above already produced the ``[image]``-style placeholder.
         # _download_media returns (path, resolved media type) and takes the
         # declared filename, so prefer its media type over the raw msg_type.
-        if msg_type in {"image", "audio", "video", "file"}:
+        if msg_type in _MEDIA_MESSAGE_TYPES:
             local_path, media_type = await self._download_media(
                 message_id,
                 msg_type,

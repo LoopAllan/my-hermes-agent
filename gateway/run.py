@@ -5731,9 +5731,7 @@ class TurnRunner:
                 user_config=ctx.user_config,
             )
             _resolved_model = self._runner._apply_message_model_alias(
-                ctx.message,
-                model,
-                ctx.user_config if isinstance(ctx.user_config, dict) else None,
+                ctx.message, model, ctx.user_config
             )
             _message_model_alias_applied = _resolved_model != model
             model = _resolved_model
@@ -8687,7 +8685,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         return model, runtime_kwargs
 
     def _apply_message_model_alias(
-        self, user_message: str, model: str, user_config: dict | None
+        self, user_message: str, model: str, user_config: Any = None
     ) -> str:
         """Apply a configured message alias to this turn's model only.
 
@@ -24087,11 +24085,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             max_iterations = _current_max_iterations()
             # Alias first: reasoning resolution below is model-aware, and the
             # main turn path likewise aliases before resolving reasoning.
-            model = self._apply_message_model_alias(
-                prompt,
-                model,
-                user_config if isinstance(user_config, dict) else None,
-            )
+            model = self._apply_message_model_alias(prompt, model, user_config)
             reasoning_config = self._resolve_session_reasoning_config(
                 source=source, model=model
             )
