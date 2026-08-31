@@ -73,7 +73,7 @@ jobs:
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a9e82d7399ccc52663121 # v7
+        uses: actions/upload-artifact@v4
         with:
           name: fork-digest-${{ matrix.arch }}
           path: /tmp/digests/*

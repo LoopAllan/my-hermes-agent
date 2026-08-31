@@ -1,6 +1,6 @@
 ---
 name: hermes-s6-container-supervision
-description: Modify, debug, or extend the s6-overlay supervision tree inside the Hermes Agent Docker image — adding new services, debugging profile gateways, understanding the Architecture B main-program pattern.
+description: Modify or debug s6 services in the Hermes Docker image.
 version: 1.0.0
 author: Hermes Agent
 license: MIT
@@ -9,7 +9,7 @@ environments: [s6]
 metadata:
   hermes:
     tags: [docker, s6, supervision, gateway, profiles]
-    related_skills: [hermes-agent, hermes-agent-dev]
+    related_skills: [hermes-agent]
 ---
 
 # Hermes s6-overlay Container Supervision
@@ -63,12 +63,13 @@ If you're just running the Hermes Agent and want to use Docker, see `website/doc
 
 | Path | Role |
 |---|---|
-| `Dockerfile` | s6-overlay install + cont-init.d wiring + `ENTRYPOINT ["/init", "/opt/hermes/docker/main-wrapper.sh"]` |
+| `Dockerfile` | s6-overlay install + cont-init.d wiring + `ENTRYPOINT ["/opt/hermes/docker/entrypoint-dispatch.sh"]` |
+| `docker/entrypoint-dispatch.sh` | PID-1 dispatcher: exec's `/init` + main-wrapper when the image owns PID 1; on wrapped runtimes (Fly Machines, `docker run --init`) falls back to stage2-hook + main-wrapper directly, restoring the s6 helper PATH first (#38349). |
 | `docker/stage2-hook.sh` | The "old entrypoint logic" — UID remap, chown, seed, skills sync. Runs as cont-init.d/01-hermes-setup. |
 | `docker/cont-init.d/02-reconcile-profiles` | Calls `hermes_cli.container_boot` on every boot to restore profile gateway slots from the persistent volume. |
 | `docker/main-wrapper.sh` | The container's CMD. Routes user args, drops to hermes via `s6-setuidgid`, exec's the chosen program. |
 | `docker/s6-rc.d/main-hermes/run` | No-op `sleep infinity` — slot exists so the s6-rc user bundle is valid; main hermes runs as the CMD, not as a supervised service. |
-| `docker/s6-rc.d/dashboard/run` | Conditional dashboard service — disabled unless `HERMES_DASHBOARD` is truthy; the run hook exits and its finish hook leaves the s6 slot down when disabled. |
+| `docker/s6-rc.d/dashboard/run` | Conditional service — `exec sleep infinity` unless `HERMES_DASHBOARD` is truthy. |
 | `docker/entrypoint.sh` | Back-compat shim that `exec`s the stage2 hook. External scripts that hard-coded the old entrypoint path still work. |
 | `hermes_cli/service_manager.py` | `S6ServiceManager`: `register_profile_gateway`, `unregister_profile_gateway`, `start/stop/restart/is_running`, `list_profile_gateways`. |
 | `hermes_cli/container_boot.py` | `reconcile_profile_gateways()` — walks persistent profiles, regenerates s6 slots, emits `container-boot.log`. |
@@ -81,7 +82,7 @@ The original plan (v1–v3) called for main hermes to run as a supervised s6-rc 
 1. **cont-init.d scripts receive no CMD args** — so the stage2 hook can't parse `docker run <image> chat -q "hi"` to set `HERMES_ARGS` for a service `run` script to consume.
 2. **`/run/s6/basedir/bin/halt` does NOT propagate the exit code** written to `/run/s6-linux-init-container-results/exitcode`. Containers always exit 143 (SIGTERM) regardless. Confirmed by skarnet (s6 author) in [issue #477](https://github.com/just-containers/s6-overlay/issues/477): _"if you want a container shutdown, you need to either have your CMD exit, or, if you have no CMD, write the container exit code you want then call halt"_.
 
-So we use the s6-overlay-native CMD pattern: `ENTRYPOINT ["/init", "/opt/hermes/docker/main-wrapper.sh"]`. /init prepends the wrapper to user args automatically — so `docker run <image> --version` becomes `/init main-wrapper.sh --version`, and `--version` doesn't get intercepted by /init's POSIX shell. The wrapper drops to hermes via `s6-setuidgid`, then exec's the chosen program. The program's exit code becomes the container exit code, exactly matching the pre-s6 tini contract.
+So we use the s6-overlay-native CMD pattern via the dispatcher: `ENTRYPOINT ["/opt/hermes/docker/entrypoint-dispatch.sh"]`, which under PID 1 exec's `/init /opt/hermes/docker/main-wrapper.sh "$@"`. The wrapper is prepended to user args automatically — so `docker run <image> --version` becomes `/init main-wrapper.sh --version`, and `--version` doesn't get intercepted by /init's POSIX shell. The wrapper drops to hermes via `s6-setuidgid`, then exec's the chosen program. The program's exit code becomes the container exit code, exactly matching the pre-s6 tini contract. When the entrypoint is NOT PID 1 (Fly Machines, `docker run --init`), the dispatcher skips `/init` entirely (it would abort with `can only run as pid 1`), restores the s6 helper PATH, runs stage2-hook.sh, and exec's main-wrapper.sh directly — no supervised services on that path (#38349).
 
 Trade-off: main hermes is unsupervised under s6. That exactly matches its behavior under tini (the pre-s6 image). Dashboard supervision is the only **new** guarantee — and per-profile gateways under `/run/service/` get full supervision.
 

@@ -1,9 +1,10 @@
-"""Docker integration coverage for the supervised Dashboard service.
+"""Harness: dashboard opt-in via HERMES_DASHBOARD.
 
-The dashboard is disabled by default and starts only when
-``HERMES_DASHBOARD=1`` (or another supported truthy value) is set. The
-restart-after-crash test lives elsewhere; this file locks the opt-in contract
-across the container lifecycle.
+Today (tini): dashboard starts once when HERMES_DASHBOARD=1; if it crashes
+it stays dead. After Phase 2 (s6): dashboard starts once; if it crashes
+it is restarted under supervision. The restart-after-crash test lives in
+Phase 2 Task 2.5; this file only locks the opt-in surface (which must
+not change between tini and s6).
 
 Every ``docker exec`` here runs as the unprivileged ``hermes`` user
 (via :func:`docker_exec`/:func:`docker_exec_sh` in conftest), matching
@@ -17,170 +18,26 @@ import time
 from tests.docker.conftest import docker_exec, docker_exec_sh, start_container, poll_container
 
 
-def test_dashboard_slot_reports_down_by_default(
+def test_dashboard_not_running_by_default(
     built_image: str, container_name: str,
 ) -> None:
-    """The supervised dashboard is disabled when HERMES_DASHBOARD is unset."""
+    """Without HERMES_DASHBOARD, no dashboard process should be running."""
     start_container(built_image, container_name, cmd="sleep 60")
-    r = docker_exec(
-        container_name, "/command/s6-svstat", "/run/service/dashboard",
-    )
-    assert r.returncode == 0, f"s6-svstat failed: {r.stderr!r} / {r.stdout!r}"
-    assert "down" in r.stdout, (
-        f"Dashboard slot should be down when HERMES_DASHBOARD is unset; "
-        f"svstat reports: {r.stdout!r}"
+    r = docker_exec(container_name, "pgrep", "-f", "hermes dashboard")
+    # pgrep exits non-zero when no match found
+    assert r.returncode != 0, (
+        "Dashboard should not be running without HERMES_DASHBOARD"
     )
 
 
-def test_dashboard_slot_reports_down_when_explicitly_disabled(
-    built_image: str, container_name: str,
-) -> None:
-    """HERMES_DASHBOARD=false keeps the opt-in dashboard service disabled."""
-    start_container(
-        built_image, container_name, "HERMES_DASHBOARD=false", cmd="sleep 60",
-    )
-    # /command/ isn't on PATH for docker-exec sessions, so call by
-    # absolute path.
-    r = docker_exec(
-        container_name, "/command/s6-svstat", "/run/service/dashboard",
-    )
-    assert r.returncode == 0, f"s6-svstat failed: {r.stderr!r} / {r.stdout!r}"
-    assert "down" in r.stdout, (
-        f"Dashboard slot should be 'down' with HERMES_DASHBOARD=false; "
-        f"svstat reports: {r.stdout!r}"
-    )
 
 
-def test_dashboard_slot_reports_up_when_enabled(
-    built_image: str, container_name: str,
-) -> None:
-    """Symmetry: with HERMES_DASHBOARD=1, s6-svstat reports the slot as up."""
-    # The opt-in path defaults to a loopback bind, which needs no auth provider.
-    # This is intentionally the minimal documented configuration.
-    start_container(
-        built_image, container_name,
-        "HERMES_DASHBOARD=1",
-        cmd="sleep 120",
-    )
-    ok, output = poll_container(
-        container_name,
-        "curl -fsS -m 2 http://127.0.0.1:9119/api/status >/dev/null "
-        "&& /command/s6-svstat /run/service/dashboard | grep -q 'up '",
-    )
-    assert ok, (
-        "Dashboard should be ready on loopback with HERMES_DASHBOARD=1: "
-        f"{output}"
-    )
 
 
-def test_dashboard_opt_in_starts(
-    built_image: str, container_name: str,
-) -> None:
-    """With HERMES_DASHBOARD=1, a dashboard process should be visible."""
-    # Default loopback bind needs no auth provider; the public-bind auth path is
-    # covered by the OAuth tests below.
-    start_container(
-        built_image, container_name,
-        "HERMES_DASHBOARD=1",
-        cmd="sleep 120",
-    )
-    # Poll for the dashboard subprocess to appear — the entrypoint
-    # backgrounds it and bootstrap (skills sync etc.) can take a few
-    # seconds before the python process actually launches.
-    ok, _ = poll_container(
-        container_name, "pgrep -f 'hermes dashboard'", deadline_s=30.0,
-    )
-    assert ok, "Dashboard should be running with HERMES_DASHBOARD=1"
 
 
-def test_dashboard_port_override(
-    built_image: str, container_name: str,
-) -> None:
-    """HERMES_DASHBOARD_PORT changes the dashboard's listen port."""
-    # Default bind is 0.0.0.0; register the basic password provider so
-    # the auth gate has a provider and the dashboard binds. See
-    # test_dashboard_slot_reports_up_when_enabled for the full rationale.
-    start_container(
-        built_image, container_name,
-        "HERMES_DASHBOARD=1",
-        "HERMES_DASHBOARD_PORT=9120",
-        "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=admin",
-        "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=test-dashboard-pw",
-        cmd="sleep 120",
-    )
-    # The dashboard process appearing in pgrep doesn't mean it's bound
-    # to the port yet — uvicorn takes another second or two to come up.
-    # The image doesn't ship ss/netstat, so probe /proc/net/tcp directly:
-    # port 9120 = 0x23A0, state 0A = LISTEN.
-    ok, stdout = poll_container(
-        container_name,
-        "grep -E ' 0+:23A0 .* 0A ' /proc/net/tcp /proc/net/tcp6 "
-        "2>/dev/null",
-        deadline_s=60.0,
-    )
-    assert ok, f"Dashboard not listening on port 9120: stdout={stdout!r}"
 
 
-def test_dashboard_restarts_after_crash(
-    built_image: str, container_name: str,
-) -> None:
-    """Phase 2 invariant: under s6 supervision, killing the dashboard
-    process should be recovered automatically.
-
-    Pre-s6 (tini) behavior was "stays dead" — the test wouldn't have
-    passed against that image. After the s6-overlay migration the
-    dashboard runs as a longrun s6-rc service and s6-supervise restarts
-    it after a ~1s backoff (the default).
-    """
-    # Default bind is 0.0.0.0; register the basic password provider so
-    # the auth gate has a provider and the supervised dashboard binds.
-    # See test_dashboard_slot_reports_up_when_enabled for the full
-    # rationale.
-    start_container(
-        built_image, container_name,
-        "HERMES_DASHBOARD=1",
-        "HERMES_DASHBOARD_BASIC_AUTH_USERNAME=admin",
-        "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=test-dashboard-pw",
-        cmd="sleep 120",
-    )
-    # Wait for the first dashboard to come up.
-    ok, _ = poll_container(
-        container_name, "pgrep -f 'hermes dashboard'", deadline_s=30.0,
-    )
-    assert ok, "Dashboard never started initially"
-
-    # Grab the initial PID. s6 may briefly transition through restart
-    # state between our poll-success and the follow-up pgrep, so retry
-    # a couple of times before giving up.
-    first_pid: str | None = None
-    for _attempt in range(10):
-        first_pid_result = docker_exec(
-            container_name, "pgrep", "-f", "hermes dashboard",
-        )
-        first_pids = first_pid_result.stdout.strip().split()
-        if first_pids:
-            first_pid = first_pids[0]
-            break
-        time.sleep(0.5)
-    assert first_pid is not None, "Could not capture initial dashboard PID"
-
-    # Kill the dashboard. The dashboard process runs as hermes, so the
-    # hermes user can kill it (same UID).
-    docker_exec(container_name, "kill", "-9", first_pid)
-
-    # s6 backs off ~1s before restart; allow up to 15s for the new
-    # process to appear with a different PID.
-    deadline = time.monotonic() + 15.0
-    while time.monotonic() < deadline:
-        r = docker_exec(container_name, "pgrep", "-f", "hermes dashboard")
-        pids = r.stdout.strip().split() if r.returncode == 0 else []
-        if pids and pids[0] != first_pid:
-            return  # success
-        time.sleep(0.5)
-
-    raise AssertionError(
-        f"Dashboard not restarted after kill (first_pid={first_pid})"
-    )
 
 
 # ---------------------------------------------------------------------------
