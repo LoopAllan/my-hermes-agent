@@ -782,6 +782,8 @@ class LineAdapter(BasePlatformAdapter):
         self.allowed_rooms = _csv_set(
             os.getenv("LINE_ALLOWED_ROOMS", "")
         ) | set(extra.get("allowed_rooms", []))
+        # Public configuration lives in config.yaml. Keep the env override only
+        # as an internal deployment bridge for managed runtimes.
         self.require_mention = _truthy_env(
             "LINE_REQUIRE_MENTION", bool(extra.get("require_mention", False))
         )
