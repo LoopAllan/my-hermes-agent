@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -26,9 +25,27 @@ def marketplace_config(config: dict[str, Any]) -> MarketplaceConfig | None:
         return None
 
 
+def _git_env() -> dict[str, str]:
+    """Environment for the plain (unauthenticated) git child processes.
+
+    Built through the canonical factory rather than a raw environ copy:
+    tests/agent/test_subprocess_env_guard.py requires every spawn site to
+    delegate there so profile-home propagation and the secret-scrub policy keep
+    a single owner. ``scrub_secrets=False`` / ``inherit_profile_home=False`` is
+    the documented byte-for-byte-equivalent of the previous raw copy — the
+    authenticated path keeps using GitAuthEnvironment instead.
+    """
+    from tools.environments.local import build_subprocess_env
+
+    return build_subprocess_env(
+        scrub_secrets=False,
+        inherit_profile_home=False,
+        extra={"GIT_TERMINAL_PROMPT": "0"},
+    )
+
+
 def _git(repo: Path, *args: str) -> str:
-    env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
+    env = _git_env()
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
         text=True,
@@ -41,8 +58,7 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
-    env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
+    env = _git_env()
     result = subprocess.run(
         ["git", "-C", str(repo), "merge-base", "--is-ancestor", ancestor, descendant],
         text=True,

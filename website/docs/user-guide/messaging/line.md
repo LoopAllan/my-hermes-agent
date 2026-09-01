@@ -90,20 +90,18 @@ gateway:
       require_mention: true
 ```
 
-For backward-compatible environment-variable configuration, use a comma-separated
-list (no spaces are required) and set `LINE_REQUIRE_MENTION=true`:
+For backward-compatible environment-variable allowlist configuration, use a
+comma-separated list (no spaces are required):
 
 ```env
 LINE_ALLOWED_USERS=U1234567890abcdef...,Uabcdef1234567890...
 LINE_ALLOWED_GROUPS=C1234567890abcdef...
 LINE_ALLOWED_ROOMS=R1234567890abcdef...
-LINE_REQUIRE_MENTION=true
 ```
 
 `require_mention` uses LINE's structured mention metadata, rather than matching
 text against a display name. If enabled, an allowlisted group or room message is
-ignored unless it explicitly mentions the bot. When both are set, the corresponding
-`LINE_*` environment variable overrides the `config.yaml` value.
+ignored unless it explicitly mentions the bot.
 
 Set `authorize_allowed_chats: true` only when a listed group or room is intended
 as a shared workspace: it authorizes that chat independently of
@@ -134,7 +132,7 @@ hermes gateway
 The agent log shows:
 
 ```
-LINE: webhook listening on 0.0.0.0:8646/line/webhook (public: https://my-tunnel.example.com)
+LINE: webhook listening on * (all interfaces, IPv4+IPv6):8646/line/webhook (public: https://my-tunnel.example.com)
 ```
 
 Add the bot as a friend from the LINE app (scan the QR in the channel's **Messaging API** tab) and send it a message.
@@ -190,13 +188,12 @@ Cron jobs with `deliver: line` route to `LINE_HOME_CHANNEL`. The adapter ships a
 |---|---|---|---|
 | `LINE_CHANNEL_ACCESS_TOKEN` | yes | — | Long-lived channel access token |
 | `LINE_CHANNEL_SECRET` | yes | — | Channel secret (HMAC-SHA256 webhook verification) |
-| `LINE_HOST` | no | `0.0.0.0` | Webhook bind host |
+| `LINE_HOST` | no | unset (dual-stack: all interfaces, IPv4+IPv6) | Webhook bind host |
 | `LINE_PORT` | no | `8646` | Webhook bind port |
 | `LINE_PUBLIC_URL` | for media | — | Public HTTPS base URL; required for image/voice/video sends |
 | `LINE_ALLOWED_USERS` | one of | — | Comma-separated user IDs (U-prefixed) for DMs |
 | `LINE_ALLOWED_GROUPS` | groups | — | Comma-separated group IDs (C-prefixed); shared-chat grants require `authorize_allowed_chats: true` |
 | `LINE_ALLOWED_ROOMS` | rooms | — | Comma-separated room IDs (R-prefixed); shared-chat grants require `authorize_allowed_chats: true` |
-| `LINE_REQUIRE_MENTION` | no | `false` | Require an explicit bot @mention for group and room messages; DMs are unaffected |
 | `LINE_ALLOW_ALL_USERS` | dev only | `false` | Skip allowlist entirely |
 | `LINE_HOME_CHANNEL` | no | — | Default cron / notification delivery target |
 | `LINE_SLOW_RESPONSE_THRESHOLD` | no | `45` | Seconds before the postback button fires (`0` = disabled) |
@@ -211,7 +208,7 @@ Cron jobs with `deliver: line` route to `LINE_HOME_CHANNEL`. The adapter ships a
 
 **"invalid signature" on webhook verify.** The `Channel secret` was copied wrong, or your tunnel rewrote the request body. Verify with `curl -i https://<tunnel>/line/webhook/health` first — that should return `{"status":"ok","platform":"line"}`.
 
-**Bot receives nothing in groups or rooms.** Check that the conversation ID is in `LINE_ALLOWED_GROUPS` (`C...`) or `LINE_ALLOWED_ROOMS` (`R...`). If `LINE_REQUIRE_MENTION=true` (or `require_mention: true`) is enabled, the message must also explicitly @mention the bot. To find IDs, send a test message and grep `~/.hermes/logs/gateway.log` for `LINE: rejecting unauthorized source` — the rejected source dict has the IDs.
+**Bot receives nothing in groups or rooms.** Check that the conversation ID is in `LINE_ALLOWED_GROUPS` (`C...`) or `LINE_ALLOWED_ROOMS` (`R...`). If `require_mention: true` is enabled in `config.yaml`, the message must also explicitly @mention the bot. To find IDs, send a test message and grep `~/.hermes/logs/gateway.log` for `LINE: rejecting unauthorized source` — the rejected source dict has the IDs.
 
 **`send_image` fails with "LINE_PUBLIC_URL must be set".** LINE's Messaging API does not accept binary uploads — images, audio, and video must be reachable HTTPS URLs. Set `LINE_PUBLIC_URL` to the tunnel's public hostname and the adapter will serve files from `/line/media/<token>/<filename>` automatically.
 

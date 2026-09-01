@@ -32,7 +32,7 @@ optional_env:
     prompt: "Webhook port"
     password: false
   - name: LINE_HOST
-    description: "Webhook bind host (default: 0.0.0.0)"
+    description: "Webhook bind host (default: unset → dual-stack, all interfaces IPv4+IPv6)"
     prompt: "Webhook host"
     password: false
   - name: LINE_PUBLIC_URL
@@ -42,10 +42,6 @@ optional_env:
   - name: LINE_ALLOWED_USERS
     description: "Comma-separated LINE user IDs allowed to DM the bot (U-prefixed)"
     prompt: "Allowed user IDs (comma-separated)"
-    password: false
-  - name: LINE_REQUIRE_MENTION
-    description: "Require an explicit bot @mention in groups and rooms (DMs unaffected; overrides config.yaml)"
-    prompt: "Require @mention in groups and rooms? (true/false)"
     password: false
   - name: LINE_ALLOWED_GROUPS
     description: "Comma-separated LINE group IDs the bot will respond in (C-prefixed)"

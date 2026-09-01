@@ -85,16 +85,15 @@ gateway:
       require_mention: true
 ```
 
-为兼容环境变量配置，可使用逗号分隔列表并设置 `LINE_REQUIRE_MENTION=true`：
+为兼容环境变量白名单配置，可使用逗号分隔列表：
 
 ```env
 LINE_ALLOWED_USERS=U1234567890abcdef...,Uabcdef1234567890...
 LINE_ALLOWED_GROUPS=C1234567890abcdef...
 LINE_ALLOWED_ROOMS=R1234567890abcdef...
-LINE_REQUIRE_MENTION=true
 ```
 
-`require_mention` 使用 LINE 的结构化提及元数据，不会以显示名称进行文字匹配。启用后，已授权群组或房间中的消息必须明确 @提及机器人，才会被处理。两者同时设置时，对应的 `LINE_*` 环境变量会覆盖 `config.yaml` 值。
+`require_mention` 使用 LINE 的结构化提及元数据，不会以显示名称进行文字匹配。启用后，已授权群组或房间中的消息必须明确 @提及机器人，才会被处理。
 
 这就够了 — `gateway/config.py` 中的捆绑插件扫描会自动识别 `plugins/platforms/line/`。无需编辑 `Platform.LINE` 枚举，无需注册 `_create_adapter`。
 
@@ -182,7 +181,6 @@ LINE_HOME_CHANNEL=Uxxxxxxxxxxxxxxxxxxxx     # 默认推送目标
 | `LINE_ALLOWED_USERS` | 私聊时必填 | — | 逗号分隔的用户 ID（U 开头） |
 | `LINE_ALLOWED_GROUPS` | 群聊时必填 | — | 逗号分隔的群组 ID（C 开头） |
 | `LINE_ALLOWED_ROOMS` | 房间时必填 | — | 逗号分隔的房间 ID（R 开头） |
-| `LINE_REQUIRE_MENTION` | 否 | `false` | 群组和房间消息必须明确 @提及机器人；私聊不受影响 |
 | `LINE_ALLOW_ALL_USERS` | 仅开发环境 | `false` | 完全跳过白名单验证 |
 | `LINE_HOME_CHANNEL` | 否 | — | 默认 cron / 通知推送目标 |
 | `LINE_SLOW_RESPONSE_THRESHOLD` | 否 | `45` | 触发 postback 按钮的等待秒数（`0` = 禁用） |
@@ -197,7 +195,7 @@ LINE_HOME_CHANNEL=Uxxxxxxxxxxxxxxxxxxxx     # 默认推送目标
 
 **webhook 验证时提示"invalid signature"。** `Channel secret` 复制有误，或隧道重写了请求体。请先用 `curl -i https://<tunnel>/line/webhook/health` 验证 — 应返回 `{"status":"ok","platform":"line"}`。
 
-**机器人在群组或房间中收不到消息。** 检查会话 ID 是否在 `LINE_ALLOWED_GROUPS`（`C...`）或 `LINE_ALLOWED_ROOMS`（`R...`）中。若已启用 `LINE_REQUIRE_MENTION=true`（或 `require_mention: true`），消息还必须明确 @提及机器人。要查找 ID，请发送测试消息后在 `~/.hermes/logs/gateway.log` 中搜索 `LINE: rejecting unauthorized source` — 被拒绝的 source 字典中包含相关 ID。
+**机器人在群组或房间中收不到消息。** 检查会话 ID 是否在 `LINE_ALLOWED_GROUPS`（`C...`）或 `LINE_ALLOWED_ROOMS`（`R...`）中。若已在 `config.yaml` 中启用 `require_mention: true`，消息还必须明确 @提及机器人。要查找 ID，请发送测试消息后在 `~/.hermes/logs/gateway.log` 中搜索 `LINE: rejecting unauthorized source` — 被拒绝的 source 字典中包含相关 ID。
 
 **`send_image` 报错"LINE_PUBLIC_URL must be set"。** LINE Messaging API 不接受二进制上传 — 图片、音频和视频必须是可访问的 HTTPS URL。将 `LINE_PUBLIC_URL` 设置为隧道的公网主机名，适配器会自动从 `/line/media/<token>/<filename>` 提供文件服务。
 
