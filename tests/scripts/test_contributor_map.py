@@ -46,6 +46,19 @@ def test_effective_map_merges_legacy_and_directory():
         assert release.AUTHOR_MAP[email] == login
 
 
+def test_tracked_mapping_names_are_unique_on_case_insensitive_filesystems():
+    tracked = subprocess.run(
+        ["git", "ls-files", "contributors/emails/*"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    names = [Path(path).name for path in tracked]
+    folded_names = [name.casefold() for name in names]
+    assert len(folded_names) == len(set(folded_names))
+
+
 
 
 # ── add_contributor.py CLI behavior ───────────────────────────────────
@@ -93,6 +106,15 @@ def test_add_accepts_legacy_consecutive_hyphen_login(emails_dir):
 def test_add_strips_at_prefix(emails_dir):
     assert add_contributor("z@z.com", "@zeta") == 0
     assert read_mapping_file(emails_dir / "z@z.com") == "zeta"
+
+
+def test_add_refuses_case_colliding_mapping(emails_dir, capsys):
+    emails_dir.mkdir(parents=True)
+    (emails_dir / "Agent@Example.com").write_text("first-user\n", encoding="utf-8")
+
+    assert add_contributor("agent@example.com", "second-user") == 1
+    assert "differs only by case" in capsys.readouterr().err
+    assert read_mapping_file(emails_dir / "Agent@Example.com") == "first-user"
 
 
 def test_cli_entrypoint_end_to_end(tmp_path):

@@ -66,6 +66,25 @@ def add_contributor(email: str, login: str, comment: str = "") -> int:
         print(f"error: {login!r} is not a valid GitHub login", file=sys.stderr)
         return 2
 
+    if EMAILS_DIR.is_dir():
+        folded_email = email.casefold()
+        collision = next(
+            (
+                entry.name
+                for entry in EMAILS_DIR.iterdir()
+                if entry.name.casefold() == folded_email and entry.name != email
+            ),
+            None,
+        )
+        if collision is not None:
+            print(
+                f"error: {email} differs only by case from existing mapping "
+                f"{collision!r}; contributor email filenames must be unique on "
+                "case-insensitive filesystems",
+                file=sys.stderr,
+            )
+            return 1
+
     path = EMAILS_DIR / email
     existing = read_mapping_file(path) if path.is_file() else None
     if existing is None:
