@@ -571,13 +571,13 @@ class TestEnvVarFiltering(unittest.TestCase):
         self.assertNotIn("ANTHROPIC_API_KEY", child_env)
         self.assertNotIn("FIRECRAWL_API_KEY", child_env)
 
-    def test_tokens_excluded(self):
+    def test_agent_github_token_preserved_while_other_tokens_are_excluded(self):
         child_env = self._get_child_env({
             "GITHUB_TOKEN": "ghp_secret",
             "MODAL_TOKEN_ID": "tok-123",
             "MODAL_TOKEN_SECRET": "tok-sec",
         })
-        self.assertNotIn("GITHUB_TOKEN", child_env)
+        self.assertEqual(child_env.get("GITHUB_TOKEN"), "ghp_secret")
         self.assertNotIn("MODAL_TOKEN_ID", child_env)
         self.assertNotIn("MODAL_TOKEN_SECRET", child_env)
 

@@ -454,12 +454,12 @@ def test_env_scrub_hermes_allowlist_and_secret_blocks():
 
     for kept in (
         "HERMES_HOME", "HERMES_PROFILE", "HERMES_CONFIG", "HERMES_ENV",
-        "HERMES_DELEGATED_CHILD_CONTEXT", "PATH",
+        "HERMES_DELEGATED_CHILD_CONTEXT", "PATH", "GITHUB_TOKEN",
     ):
         assert kept in out, f"{kept} should be kept"
     for dropped in (
         "HERMES_BASE_URL", "HERMES_INTERACTIVE", "HERMES_KANBAN_DB",
-        "SENTRY_DSN", "SLACK_WEBHOOK", "OPENAI_API_KEY", "GITHUB_TOKEN",
+        "SENTRY_DSN", "SLACK_WEBHOOK", "OPENAI_API_KEY",
         "RANDOM_X",
     ):
         assert dropped not in out, f"{dropped} should be dropped"

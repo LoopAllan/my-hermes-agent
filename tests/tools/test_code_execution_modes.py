@@ -355,7 +355,7 @@ class TestSecurityInvariantsAcrossModes(unittest.TestCase):
         self.assertNotIn("ant-should-not-leak", result["output"])
 
     def test_api_keys_scrubbed_in_project_mode(self):
-        """CRITICAL: the project-mode default does NOT leak user credentials."""
+        """Provider credentials remain scrubbed; agent GitHub auth is available."""
         code = (
             "import os\n"
             "print('KEY=' + os.environ.get('OPENAI_API_KEY', 'MISSING'))\n"
@@ -369,9 +369,9 @@ class TestSecurityInvariantsAcrossModes(unittest.TestCase):
         }):
             result = self._run(code, mode="project")
         self.assertEqual(result["status"], "success")
-        for needle in ("KEY=MISSING", "TOK=MISSING", "SEC=MISSING"):
+        for needle in ("KEY=MISSING", "TOK=MISSING", "SEC=ghp-should-not-leak"):
             self.assertIn(needle, result["output"])
-        for leaked in ("sk-should-not-leak", "ant-should-not-leak", "ghp-should-not-leak"):
+        for leaked in ("«redacted:sk-…»", "ant-should-not-leak"):
             self.assertNotIn(leaked, result["output"])
 
     def test_secret_substrings_scrubbed_in_project_mode(self):

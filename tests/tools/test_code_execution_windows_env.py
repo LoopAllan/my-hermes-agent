@@ -82,7 +82,8 @@ class TestScrubChildEnvWindows:
             "PATH": r"C:\Windows\System32;C:\Python311",
             "HOME": r"C:\Users\alice",
             "TEMP": r"C:\Users\alice\AppData\Local\Temp",
-            # Should still be blocked:
+            # Provider credentials and generic secrets remain blocked; the
+            # dedicated agent GitHub token is intentionally preserved.
             "OPENAI_API_KEY": "sk-secret",
             "GITHUB_TOKEN": "ghp_secret",
             "MY_PASSWORD": "hunter2",
@@ -112,7 +113,7 @@ class TestScrubChildEnvWindows:
         assert "TEMP" in scrubbed
 
     def test_secrets_still_blocked_on_windows(self):
-        """The Windows allowlist must NOT defeat the secret-substring block.
+        """The Windows allowlist must NOT defeat provider-secret filtering.
 
         This is the key security invariant: essentials are allowed by
         *exact name*, and the secret-substring block runs before the
@@ -124,7 +125,7 @@ class TestScrubChildEnvWindows:
                                     is_passthrough=_no_passthrough,
                                     is_windows=True)
         assert "OPENAI_API_KEY" not in scrubbed
-        assert "GITHUB_TOKEN" not in scrubbed
+        assert scrubbed["GITHUB_TOKEN"] == "ghp_secret"
         assert "MY_PASSWORD" not in scrubbed
 
 
@@ -273,13 +274,11 @@ def _legacy_posix_scrubber(source_env, is_passthrough):
 
 
 class TestPosixEquivalence:
-    """Lock in the invariant that _scrub_child_env(env, is_windows=False)
-    behaves *bit-for-bit identically* to the pre-refactor inline scrubber.
+    """Lock in the POSIX scrubber contract except for the agent token.
 
-    If this ever fails, it means somebody changed POSIX env-scrubbing
-    behavior — maybe on purpose, maybe not.  Either way it should land
-    as a deliberate, reviewed change (update _legacy_posix_scrubber
-    above in the same PR).
+    ``GITHUB_TOKEN`` is the deliberate exception: it belongs to the agent's
+    local execution environment. Every other result must match the legacy
+    scrubber unless separately reviewed.
 
     Rationale: the Windows-essentials patch refactored the scrubber into
     a helper.  Linux/macOS must not regress.  This class gates that.
@@ -351,16 +350,18 @@ class TestPosixEquivalence:
         ("tenor_passthrough", lambda k: k == "TENOR_API_KEY"),
         ("all_passthrough", lambda _: True),
     ])
-    def test_posix_behavior_unchanged(self, env_name, env, pt_name, pt):
+    def test_posix_behavior_preserves_only_agent_github_token(self, env_name, env, pt_name, pt):
         """For every combination of (env shape × passthrough rule), the
-        new helper with is_windows=False must produce the exact same dict
-        as the legacy inline scrubber.
+        new helper with is_windows=False must match the legacy inline
+        scrubber except for the deliberate agent GitHub-token exception.
 
         We parametrize over three passthrough rules to cover the full
         surface: no passthrough, single-var passthrough (the common
         skill-registered case), and everything-passes (edge case that
         could expose precedence bugs)."""
         expected = _legacy_posix_scrubber(env, pt)
+        if "GITHUB_TOKEN" in env:
+            expected["GITHUB_TOKEN"] = env["GITHUB_TOKEN"]
         actual = _scrub_child_env(env, is_passthrough=pt, is_windows=False)
         assert actual == expected, (
             f"POSIX behavior regressed for env={env_name}, passthrough={pt_name}\n"
