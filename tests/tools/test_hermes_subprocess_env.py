@@ -5,8 +5,8 @@ Covers GHSA-m4m8-xjp4-5rmm / issue #29157: subprocesses spawned by the
 gateway/browser/ACP/installer paths must not blindly inherit the operator's
 full credential environment. Two tiers:
 
-  * Tier 1 (_ALWAYS_STRIP_KEYS): gateway bot tokens, GitHub auth, infra
-    secrets — stripped even when inherit_credentials=True.
+  * Tier 1 (_ALWAYS_STRIP_KEYS): gateway bot tokens, alternate GitHub auth,
+    and infrastructure secrets — stripped even when inherit_credentials=True.
   * Tier 2 (_HERMES_PROVIDER_ENV_BLOCKLIST): LLM provider/tool keys — stripped
     unless the caller opts into inherit_credentials=True.
 """
@@ -62,6 +62,10 @@ class TestStripByDefault:
         for var in _TIER1_SAMPLE:
             assert var not in result, f"{var} leaked (Tier-1) with inherit_credentials=False"
 
+    def test_agent_github_token_is_preserved_by_default(self):
+        result = _build({"GITHUB_TOKEN": "agent-github-token"})
+        assert result["GITHUB_TOKEN"] == "agent-github-token"
+
     def test_buzz_platform_vars_stripped_by_default(self):
         """BUZZ_* first-party platform credentials must NOT reach the
         non-terminal spawn surface (browser / TUI host / copilot-executor),
@@ -88,8 +92,7 @@ class TestInheritCredentials:
             assert result.get(var) == val, f"{var} should survive inherit_credentials=True"
 
     def test_tier1_secrets_stripped_even_when_inheriting(self):
-        """The whole point of Tier 1: gateway/GitHub/infra secrets never reach
-        a child, even a model-driving CLI that legitimately needs provider keys."""
+        """Gateway, alternate GitHub, and infra secrets never reach children."""
         result = _build({**_PROVIDER_SAMPLE, **_TIER1_SAMPLE}, inherit_credentials=True)
         for var in _TIER1_SAMPLE:
             assert var not in result, (
@@ -98,6 +101,13 @@ class TestInheritCredentials:
         # ...while provider keys survive.
         for var in _PROVIDER_SAMPLE:
             assert var in result
+
+    def test_agent_github_token_is_preserved_when_inheriting(self):
+        result = _build(
+            {"GITHUB_TOKEN": "agent-github-token"},
+            inherit_credentials=True,
+        )
+        assert result["GITHUB_TOKEN"] == "agent-github-token"
 
     def test_pythonutf8_set_when_inheriting(self):
         assert _build(inherit_credentials=True).get("PYTHONUTF8") == "1"
@@ -120,8 +130,14 @@ class TestTierInvariants:
     def test_tier1_covers_gateway_bot_token(self):
         assert "TELEGRAM_BOT_TOKEN" in _ALWAYS_STRIP_KEYS
 
-    def test_tier1_covers_github_auth(self):
-        assert {"GH_TOKEN", "GITHUB_TOKEN"} <= _ALWAYS_STRIP_KEYS
+    def test_tier1_covers_alternate_github_auth(self):
+        assert {
+            "GH_TOKEN",
+            "GITHUB_APP_ID",
+            "GITHUB_APP_PRIVATE_KEY_PATH",
+            "GITHUB_APP_INSTALLATION_ID",
+        } <= _ALWAYS_STRIP_KEYS
+        assert "GITHUB_TOKEN" not in _ALWAYS_STRIP_KEYS
 
     def test_tier1_covers_infra_secrets(self):
         assert {"MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "DAYTONA_API_KEY"} <= _ALWAYS_STRIP_KEYS

@@ -22,6 +22,7 @@ from tools.environments.local import (
     _HERMES_PROVIDER_ENV_BLOCKLIST,
     _HERMES_PROVIDER_ENV_FORCE_PREFIX,
 )
+from tools.env_policy import AGENT_OWNED_ENV_VARS
 
 
 def _running_venv_site_packages() -> Path:
@@ -214,7 +215,6 @@ class TestProviderEnvBlocklist:
             "HERMES_DASHBOARD_SESSION_TOKEN": "dashboard-session-secret",
             "BROWSERBASE_PROJECT_ID": "bb-project",
             "ELEVENLABS_API_KEY": "el-secret",
-            "GITHUB_TOKEN": "ghp_secret",
             "GH_TOKEN": "gh_alias_secret",
             "GATEWAY_ALLOW_ALL_USERS": "true",
             "GATEWAY_ALLOWED_USERS": "alice,bob",
@@ -230,6 +230,45 @@ class TestProviderEnvBlocklist:
 
         for var in leaked_vars:
             assert var not in result_env, f"{var} leaked into subprocess env"
+
+    def test_agent_github_token_is_preserved_across_subprocess_builders(self):
+        """The agent-owned GitHub token reaches every local child builder.
+
+        Alternate GitHub credentials remain protected so this exception cannot
+        expose an interactive ``gh`` login or GitHub App identity by accident.
+        """
+        from tools.environments import local as local_mod
+
+        source = {
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/home/user",
+            "GITHUB_TOKEN": "agent-github-token",
+            "GH_TOKEN": "interactive-gh-token",
+            "GITHUB_APP_PRIVATE_KEY_PATH": "/run/secrets/github-app.pem",
+        }
+        with patch.dict(os.environ, source, clear=True):
+            environments = (
+                local_mod._make_run_env({}),
+                local_mod._sanitize_subprocess_env(dict(source)),
+                local_mod.hermes_subprocess_env(),
+            )
+
+        for child_env in environments:
+            assert child_env["GITHUB_TOKEN"] == "agent-github-token"
+            assert "GH_TOKEN" not in child_env
+            assert "GITHUB_APP_PRIVATE_KEY_PATH" not in child_env
+
+    def test_local_terminal_can_read_agent_github_token(self, tmp_path, monkeypatch):
+        """The real local shell receives the operator-provisioned token."""
+        monkeypatch.setenv("GITHUB_TOKEN", "agent-github-token")
+        env = LocalEnvironment(cwd=str(tmp_path))
+        try:
+            result = env.execute("printf '%s' \"$GITHUB_TOKEN\"")
+        finally:
+            env.cleanup()
+
+        assert result["returncode"] == 0
+        assert result["output"] == "agent-github-token"
 
     def test_safe_vars_are_preserved(self):
         """Standard env vars (PATH, HOME, USER) must still be passed through."""
@@ -1406,12 +1445,11 @@ class TestBlocklistCoverage:
         """Every api_key_env_var and base_url_env_var from PROVIDER_REGISTRY
         must appear in the blocklist — ensures no drift.
 
-        CLAUDE_CODE_OAUTH_TOKEN is the one deliberate exemption: it is owned
-        by the user's Claude Code install, not Hermes (#55878).
+        Deliberate operator-owned exemptions must remain outside the blocklist.
         """
         from hermes_cli.auth import PROVIDER_REGISTRY
 
-        exempt = {"CLAUDE_CODE_OAUTH_TOKEN"}
+        exempt = {"CLAUDE_CODE_OAUTH_TOKEN"} | AGENT_OWNED_ENV_VARS
         for pconfig in PROVIDER_REGISTRY.values():
             for var in pconfig.api_key_env_vars:
                 if var in exempt:
@@ -1491,6 +1529,8 @@ class TestBlocklistCoverage:
         for name, metadata in OPTIONAL_ENV_VARS.items():
             category = metadata.get("category")
             if category in {"tool", "messaging"}:
+                if name in AGENT_OWNED_ENV_VARS:
+                    continue
                 assert name in _HERMES_PROVIDER_ENV_BLOCKLIST, (
                     f"Optional env var {name} (category={category}) missing from blocklist"
                 )

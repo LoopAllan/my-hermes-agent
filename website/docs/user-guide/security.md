@@ -520,6 +520,14 @@ If you add names to `terminal.docker_forward_env`, those variables are intention
 
 Both `execute_code` and `terminal` strip sensitive environment variables from child processes to prevent credential exfiltration by LLM-generated code. However, skills that declare `required_environment_variables` legitimately need access to those vars.
 
+`GITHUB_TOKEN` is a deliberate exact-name exception. When present in the
+Hermes process environment, it is treated as an operator-provisioned identity
+owned by the agent and reaches local `terminal`, `execute_code`, and other
+Hermes child-process environments without an `env_passthrough` entry. Because
+model-authored code can read and use it directly, provision a dedicated,
+least-privilege token for Hermes. `GH_TOKEN` and GitHub App credentials remain
+protected.
+
 First-party platform credentials — the `BUZZ_*` variables used by the Buzz messaging platform — are passed through to `terminal` children (foreground and background/PTY spawns) **only when the session is actually operating as a Buzz agent**: the process is a Buzz-ACP managed agent (`BUZZ_MANAGED_AGENT` set by the Buzz Desktop harness) or the live gateway session's platform is `buzz`. This lets a Buzz platform agent invoke its platform-mandated CLI (e.g. `buzz`) from the terminal tool, while Telegram/CLI/cron sessions on the same host keep the variables stripped. Because `_sanitize_subprocess_env` also feeds search workers (e.g. the ddgs web-search subprocess), the computer-use driver binary, and user-script runners (bang `!` commands, quick commands, cron scripts, webhook-filter scripts), those children receive the variables too when spawned from a Buzz session. The carve-out is **terminal-only**: it does not apply to `execute_code`, browser/TUI-host spawns (`hermes_subprocess_env`), Docker/Modal children, or `env_passthrough` registration, which remain sealed.
 
 ### How It Works
@@ -588,15 +596,15 @@ Paths are relative to `~/.hermes/`. Files are mounted to `/root/.hermes/` inside
 
 | Sandbox | Default Filter | Passthrough Override |
 |---------|---------------|---------------------|
-| **execute_code** | Blocks vars containing `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `PASSWD`, `AUTH` in name; only allows safe-prefix vars through | ✅ Passthrough vars bypass both checks |
-| **terminal** (local) | Blocks explicit Hermes infrastructure vars (provider keys, gateway tokens, tool API keys) | ✅ Passthrough vars bypass the blocklist |
+| **execute_code** | Blocks vars containing `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `PASSWD`, `AUTH` in name; only allows safe-prefix vars through. `GITHUB_TOKEN` is the agent-owned exact-name exception. | ✅ Passthrough vars bypass both checks |
+| **terminal** (local) | Blocks explicit Hermes infrastructure vars (provider keys, gateway tokens, tool API keys). `GITHUB_TOKEN` is the agent-owned exact-name exception. | ✅ Passthrough vars bypass the blocklist |
 | **terminal** (Docker) | No host env vars by default | ✅ Passthrough vars + `docker_forward_env` forwarded via `-e` |
 | **terminal** (Modal) | No host env/files by default | ✅ Credential files mounted; env passthrough via sync |
 | **MCP** | Blocks everything except safe system vars + explicitly configured `env` | ❌ Not affected by passthrough (use MCP `env` config instead) |
 
 ### Security Considerations
 
-- The passthrough only affects vars you or your skills explicitly declare — the default security posture is unchanged for arbitrary LLM-generated code
+- Except for the documented agent-owned `GITHUB_TOKEN`, passthrough only affects vars you or your skills explicitly declare
 - Credential files are mounted **read-only** into Docker containers
 - Skills Guard scans skill content for suspicious env access patterns before installation
 - Missing/unset vars are never registered (you can't leak what doesn't exist)

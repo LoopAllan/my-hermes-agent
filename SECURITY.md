@@ -127,6 +127,14 @@ provider API keys and gateway tokens are stripped by default;
 variables explicitly declared by the operator or by a loaded
 skill are passed through.
 
+`GITHUB_TOKEN` is a deliberate exact-name exception: Hermes treats it as an
+operator-provisioned identity owned by the agent and forwards it to local
+terminal, code-execution, and child-process environments without requiring an
+`env_passthrough` entry. This gives model-authored code direct access to that
+token. Operators must therefore provision a dedicated, least-privilege GitHub
+token for the agent rather than reusing an interactive user or GitHub App
+credential. `GH_TOKEN` and GitHub App credentials remain stripped.
+
 This reduces casual exfiltration. It is not containment. Any
 component running inside the agent process (skills, plugins, hook
 handlers) can read whatever the agent itself can read, including
