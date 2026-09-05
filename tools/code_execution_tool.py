@@ -48,7 +48,7 @@ _IS_WINDOWS = platform.system() == "Windows"
 from typing import Any, Dict, List, Optional, Tuple
 
 from tools.thread_context import propagate_context_to_thread
-from tools.env_policy import AGENT_OWNED_ENV_VARS
+from tools.env_policy import AGENT_OWNED_ENV_VARS, resolve_agent_owned_env_value
 from agent.thread_scoped_output import thread_scoped_silence
 
 # Availability gate.  On Windows we fall back to loopback TCP for the
@@ -278,6 +278,14 @@ def _scrub_child_env(source_env, is_passthrough=None, is_windows=None):
     Extracted into a helper so tests can exercise the logic without
     spawning a subprocess.
     """
+    source_env = dict(source_env)
+    for key in AGENT_OWNED_ENV_VARS:
+        value = resolve_agent_owned_env_value(key, source_env.get(key))
+        if value is None:
+            source_env.pop(key, None)
+        else:
+            source_env[key] = value
+
     resolve_passthrough_value = None
     if is_passthrough is None:
         try:

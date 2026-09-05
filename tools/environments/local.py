@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from hermes_constants import get_process_hermes_home
-from tools.env_policy import AGENT_OWNED_ENV_VARS
+from tools.env_policy import AGENT_OWNED_ENV_VARS, resolve_agent_owned_env_value
 from tools.environments.base import BaseEnvironment, _pipe_stdin
 from hermes_cli._subprocess_compat import windows_hide_flags
 
@@ -890,6 +890,13 @@ def hermes_subprocess_env(*, inherit_credentials: bool = False) -> dict[str, str
         for key in _HERMES_PROVIDER_ENV_BLOCKLIST:
             env.pop(key, None)
 
+    for key in AGENT_OWNED_ENV_VARS:
+        value = resolve_agent_owned_env_value(key, env.get(key))
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
+
     # Windows UTF-8 safety for spawned processes (#31420).
     env.setdefault("PYTHONUTF8", "1")
 
@@ -1541,6 +1548,12 @@ def _make_run_env(env: dict) -> dict:
         _resolve_passthrough_value = lambda _name, fallback: fallback  # noqa: E731
 
     merged = dict(os.environ | env)
+    for key in AGENT_OWNED_ENV_VARS:
+        value = resolve_agent_owned_env_value(key, merged.get(key))
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
     run_env = {}
     for k, v in merged.items():
         if k.startswith(_HERMES_PROVIDER_ENV_FORCE_PREFIX):
