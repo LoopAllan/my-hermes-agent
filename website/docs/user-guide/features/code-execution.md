@@ -155,6 +155,14 @@ Security-critical invariants are identical across both modes:
 
 Switching mode changes where scripts run and which interpreter runs them, not what credentials they can see or which tools they can call.
 
+:::caution Agent-owned GitHub token
+`GITHUB_TOKEN` is an intentional exception to environment scrubbing. When it
+is present in the Hermes process environment, both `execute_code` and local
+terminal children inherit it so the agent can authenticate GitHub operations.
+Use a dedicated, least-privilege token for Hermes. `GH_TOKEN` and GitHub App
+credentials are still stripped.
+:::
+
 ## Resource Limits
 
 | Resource | Limit | Notes |

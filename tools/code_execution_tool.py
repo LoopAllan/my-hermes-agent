@@ -48,6 +48,7 @@ _IS_WINDOWS = platform.system() == "Windows"
 from typing import Any, Dict, List, Optional, Tuple
 
 from tools.thread_context import propagate_context_to_thread
+from tools.env_policy import AGENT_OWNED_ENV_VARS, resolve_agent_owned_env_value
 from agent.thread_scoped_output import thread_scoped_silence
 
 # Availability gate.  On Windows we fall back to loopback TCP for the
@@ -266,16 +267,25 @@ def _scrub_child_env(source_env, is_passthrough=None, is_windows=None):
       1. Passthrough vars (skill- or config-declared) pass through the active
          profile secret scope; an absent scoped value is omitted and an
          unscoped multiplex read fails closed.
-      2. Secret-substring names (KEY/TOKEN/DSN/WEBHOOK/etc.) are blocked.
-      3. Names matching a safe prefix pass.
-      4. Operational HERMES_* vars (_HERMES_CHILD_ALLOWED) pass by exact name.
-      5. On Windows, a small OS-essential allowlist passes by exact name
+      2. Agent-owned operator credentials pass through by exact name.
+      3. Secret-substring names (KEY/TOKEN/DSN/WEBHOOK/etc.) are blocked.
+      4. Names matching a safe prefix pass.
+      5. Operational HERMES_* vars (_HERMES_CHILD_ALLOWED) pass by exact name.
+      6. On Windows, a small OS-essential allowlist passes by exact name
          — without these the child can't even create a socket or spawn a
          subprocess.
 
     Extracted into a helper so tests can exercise the logic without
     spawning a subprocess.
     """
+    source_env = dict(source_env)
+    for key in AGENT_OWNED_ENV_VARS:
+        value = resolve_agent_owned_env_value(key, source_env.get(key))
+        if value is None:
+            source_env.pop(key, None)
+        else:
+            source_env[key] = value
+
     resolve_passthrough_value = None
     if is_passthrough is None:
         try:
@@ -309,6 +319,9 @@ def _scrub_child_env(source_env, is_passthrough=None, is_windows=None):
             resolved = resolve_passthrough_value(k, v)
             if resolved is not None:
                 scrubbed[k] = resolved
+            continue
+        if k in AGENT_OWNED_ENV_VARS:
+            scrubbed[k] = v
             continue
         if any(s in k.upper() for s in _SECRET_SUBSTRINGS):
             continue

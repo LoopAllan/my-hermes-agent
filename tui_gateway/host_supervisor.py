@@ -337,7 +337,6 @@ class HostSupervisor:
         self._hello_event.clear()
         self._hello = {}
         env = hermes_subprocess_env(inherit_credentials=True)
-        env.update(os.environ)
         if self.env:
             env.update(self.env)
         env["HERMES_COMPUTE_HOST_HEARTBEAT_SECS"] = str(self.heartbeat_secs)

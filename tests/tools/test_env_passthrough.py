@@ -186,6 +186,23 @@ class TestExecuteCodeIntegration:
 
         assert "SERVICE_TOKEN" not in child_env
 
+    def test_execute_code_preserves_only_agent_github_token(self):
+        """execute_code receives the dedicated agent token, not other auth."""
+        from tools.code_execution_tool import _scrub_child_env
+
+        child_env = _scrub_child_env({
+            "PATH": "/usr/bin",
+            "GITHUB_TOKEN": "agent-github-token",
+            "GH_TOKEN": "interactive-gh-token",
+            "GITHUB_APP_PRIVATE_KEY_PATH": "/run/secrets/github-app.pem",
+            "OPENAI_API_KEY": "provider-key",
+        })
+
+        assert child_env["GITHUB_TOKEN"] == "agent-github-token"
+        assert "GH_TOKEN" not in child_env
+        assert "GITHUB_APP_PRIVATE_KEY_PATH" not in child_env
+        assert "OPENAI_API_KEY" not in child_env
+
     def test_execute_code_strips_buzz_vars(self):
         """BUZZ_* credentials must stay out of the execute_code child even
         though they pass through to terminal children (issue #78026): the
@@ -298,6 +315,14 @@ class TestTerminalIntegration:
         result = _sanitize_subprocess_env(env)
         assert blocked_var not in result
         assert "PATH" in result
+
+    def test_agent_github_token_is_not_a_provider_credential(self):
+        """The dedicated agent token may be explicitly registered by config."""
+        from tools.environments.local import _HERMES_PROVIDER_ENV_BLOCKLIST
+
+        assert "GITHUB_TOKEN" not in _HERMES_PROVIDER_ENV_BLOCKLIST
+        register_env_passthrough(["GITHUB_TOKEN"])
+        assert is_env_passthrough("GITHUB_TOKEN")
 
     def test_passthrough_cannot_override_provider_blocklist(self):
         """GHSA-rhgp-j443-p4rf: register_env_passthrough must NOT accept

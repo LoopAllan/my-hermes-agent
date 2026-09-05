@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from hermes_constants import get_process_hermes_home
+from tools.env_policy import AGENT_OWNED_ENV_VARS, resolve_agent_owned_env_value
 from tools.environments.base import BaseEnvironment, _pipe_stdin
 from hermes_cli._subprocess_compat import windows_hide_flags
 
@@ -432,6 +433,10 @@ def _build_provider_env_blocklist() -> frozenset:
     # It arrives via the registry loop above (anthropic api_key_env_vars),
     # so remove it explicitly.
     blocked.discard("CLAUDE_CODE_OAUTH_TOKEN")
+    # GITHUB_TOKEN may be provisioned specifically as the agent's own GitHub
+    # identity. Preserve it for model-driven local execution while alternate
+    # GitHub credentials (GH_TOKEN and GitHub App auth) remain protected.
+    blocked.difference_update(AGENT_OWNED_ENV_VARS)
     # BUZZ_* is deliberately NOT discarded here, even for Buzz-managed agents
     # (BUZZ_MANAGED_AGENT set by the buzz-acp harness).  This blocklist is
     # shared by every scrub surface — the terminal paths, execute_code, and
@@ -793,13 +798,12 @@ def _scrub_delegated_child_kanban_env(env: dict[str, str]) -> dict[str, str]:
 # CLI (claude / codex / gemini).  These are not LLM provider credentials; no
 # legitimate child Hermes spawns needs them, and they are the highest-value
 # secrets to keep out of a compromised dependency's reach (gateway bot tokens,
-# GitHub auth, remote-compute tokens, dashboard session secret).  The set is a
+# alternate GitHub auth, remote-compute tokens, dashboard session secret). The set is a
 # narrow subset of _HERMES_PROVIDER_ENV_BLOCKLIST; provider keys are handled by
 # the conditional Tier-2 strip in hermes_subprocess_env().
 _ALWAYS_STRIP_KEYS: frozenset[str] = frozenset({
     # GitHub auth
     "GH_TOKEN",
-    "GITHUB_TOKEN",
     "GITHUB_APP_ID",
     "GITHUB_APP_PRIVATE_KEY_PATH",
     "GITHUB_APP_INSTALLATION_ID",
@@ -845,8 +849,8 @@ def hermes_subprocess_env(*, inherit_credentials: bool = False) -> dict[str, str
 
     Two-tier stripping:
 
-    * **Tier 1 (always):** ``_ALWAYS_STRIP_KEYS`` — gateway bot tokens, GitHub
-      auth, and remote-compute secrets are removed regardless of
+    * **Tier 1 (always):** ``_ALWAYS_STRIP_KEYS`` — gateway bot tokens,
+      alternate GitHub auth, and remote-compute secrets are removed regardless of
       ``inherit_credentials``.  No child Hermes spawns legitimately needs them.
     * **Tier 2 (conditional):** the rest of ``_HERMES_PROVIDER_ENV_BLOCKLIST``
       (LLM provider API keys, tool secrets) is removed unless the caller passes
@@ -885,6 +889,13 @@ def hermes_subprocess_env(*, inherit_credentials: bool = False) -> dict[str, str
         # Tier 2 — strip provider/tool credentials unless explicitly inherited.
         for key in _HERMES_PROVIDER_ENV_BLOCKLIST:
             env.pop(key, None)
+
+    for key in AGENT_OWNED_ENV_VARS:
+        value = resolve_agent_owned_env_value(key, env.get(key))
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
 
     # Windows UTF-8 safety for spawned processes (#31420).
     env.setdefault("PYTHONUTF8", "1")
@@ -1537,6 +1548,12 @@ def _make_run_env(env: dict) -> dict:
         _resolve_passthrough_value = lambda _name, fallback: fallback  # noqa: E731
 
     merged = dict(os.environ | env)
+    for key in AGENT_OWNED_ENV_VARS:
+        value = resolve_agent_owned_env_value(key, merged.get(key))
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
     run_env = {}
     for k, v in merged.items():
         if k.startswith(_HERMES_PROVIDER_ENV_FORCE_PREFIX):
