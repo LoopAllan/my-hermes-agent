@@ -28,12 +28,17 @@ def test_docker_image_defaults_codex_home_to_shared_mount() -> None:
     )
 
 
-def test_stage2_hook_bootstraps_shared_codex_home_outside_hermes_home() -> None:
+def test_stage2_hook_preserves_the_root_owned_codex_rules_artifact() -> None:
     hook = STAGE2_HOOK.read_text(encoding="utf-8")
 
     assert 'CODEX_HOME="${CODEX_HOME:-/etc/data/codex}"' in hook
     assert 'mkdir -p "$CODEX_HOME"' in hook
-    assert 'chown_hermes_tree "$CODEX_HOME"' in hook
+    assert 'chown_hermes_tree "$CODEX_HOME"' not in hook
+    assert 'find "$CODEX_HOME" -mindepth 1 -maxdepth 1 ! -name AGENTS.md' in hook
+    assert 'chown root:root "$CODEX_HOME/AGENTS.md"' in hook
+    assert 'chmod 0444 "$CODEX_HOME/AGENTS.md"' in hook
+    assert 'chown root:hermes "$CODEX_HOME"' in hook
+    assert 'chmod 1770 "$CODEX_HOME"' in hook
     assert 'as_hermes mkdir -p \\' in hook
     assert '    "$CODEX_HOME" \\' in hook
 
@@ -51,7 +56,8 @@ def test_linux_compose_mounts_profile_data_and_shared_codex_auth_separately() ->
         environment = service.get("environment", [])
 
         assert "${HERMES_PROFILE_DATA:-~/.hermes}:/opt/data" in volumes
-        assert "${HERMES_SHARED_CODEX_DIR:-~/.codex}:/etc/data/codex" in volumes
+        assert "${HERMES_SHARED_CODEX_DIR:-~/.codex}/auth.json:/etc/data/codex/auth.json" in volumes
+        assert "${HERMES_SHARED_CODEX_DIR:-~/.codex}:/etc/data/codex" not in volumes
         assert "CODEX_HOME=/etc/data/codex" in environment
 
 
@@ -64,5 +70,6 @@ def test_windows_compose_mounts_profile_data_and_shared_codex_auth_separately() 
         environment = service.get("environment", [])
 
         assert "${HERMES_PROFILE_DATA:-${USERPROFILE}/.hermes}:/opt/data" in volumes
-        assert "${HERMES_SHARED_CODEX_DIR:-${USERPROFILE}/.codex}:/etc/data/codex" in volumes
+        assert "${HERMES_SHARED_CODEX_DIR:-${USERPROFILE}/.codex}/auth.json:/etc/data/codex/auth.json" in volumes
+        assert "${HERMES_SHARED_CODEX_DIR:-${USERPROFILE}/.codex}:/etc/data/codex" not in volumes
         assert "CODEX_HOME=/etc/data/codex" in environment

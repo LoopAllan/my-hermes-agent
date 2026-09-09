@@ -259,10 +259,20 @@ fi
 # Codex CLI auth is intentionally separate from $HERMES_HOME so profile
 # deployments can each mount their own host directory at /opt/data while
 # sharing one Codex OAuth store at CODEX_HOME (default /etc/data/codex).
-# Treat it as Hermes-owned runtime state when present, but do not mix it into
-# the broader /opt/data chown contract.
+#
+# The Docker build installs an immutable AGENTS.md at the default CODEX_HOME.
+# Only the remaining first-level runtime state is Hermes-owned; never recurse
+# through the directory itself or the root-owned shared rules artifact would be
+# silently made mutable before Codex starts.
 if [ -d "$CODEX_HOME" ]; then
-    chown_hermes_tree "$CODEX_HOME"
+    find "$CODEX_HOME" -mindepth 1 -maxdepth 1 ! -name AGENTS.md -exec chown -R hermes:hermes {} + 2>/dev/null || \
+        echo "[stage2] Warning: chown Codex runtime state failed (rootless container?) — continuing"
+    if [ "$CODEX_HOME" = "/etc/data/codex" ] && [ -f "$CODEX_HOME/AGENTS.md" ]; then
+        chown root:root "$CODEX_HOME/AGENTS.md" 2>/dev/null || true
+        chmod 0444 "$CODEX_HOME/AGENTS.md" 2>/dev/null || true
+        chown root:hermes "$CODEX_HOME" 2>/dev/null || true
+        chmod 1770 "$CODEX_HOME" 2>/dev/null || true
+    fi
 fi
 
 # --- Immutable install tree ---

@@ -11,6 +11,7 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GENERATOR = REPO_ROOT / "scripts" / "build_rule_artifacts.py"
 DOCKERFILE = REPO_ROOT / "Dockerfile"
+DOCKERIGNORE = REPO_ROOT / ".dockerignore"
 CANONICAL_RULES = REPO_ROOT / "docker" / "rules"
 MARKER = "<!-- managed-by: docker/build_rule_artifacts.py -->"
 
@@ -67,7 +68,9 @@ def test_dockerfile_builds_root_owned_artifacts_without_runtime_rule_setup() -> 
     assert "/etc/claude-code/CLAUDE.md" in dockerfile
     assert "chmod 0444 /etc/claude-code/CLAUDE.md /etc/data/codex/AGENTS.md" in dockerfile
     assert "chown root:hermes /etc/data/codex" in dockerfile
+    assert "chmod 0555 /etc/claude-code" in dockerfile
     assert "chmod 1770 /etc/data/codex" in dockerfile
+    assert "!docker/rules/**/*.md" in DOCKERIGNORE.read_text(encoding="utf-8")
     assert "VOLUME [ \"/opt/data\" ]" in dockerfile
     assert '"/etc/data/codex"' not in dockerfile.split("VOLUME", 1)[1]
     assert "llm_rule_setup.sh" not in dockerfile
