@@ -58,6 +58,8 @@ htmlcov/
 
 # Documentation
 *.md
+# Canonical agent rules are runtime inputs and must ship in the image.
+!docker/rules/**/*.md
 
 # Runtime data (bind-mounted at /opt/data; must not leak into build context)
 data/
