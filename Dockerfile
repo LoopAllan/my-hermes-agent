@@ -300,6 +300,12 @@ RUN mkdir -p /opt/hermes/bin && \
     cp /opt/hermes/docker/hermes-exec-shim.sh /opt/hermes/bin/hermes && \
     chmod 0755 /opt/hermes /opt/hermes/bin/hermes && \
     printf 'docker\n' > /opt/hermes/.install_method
+RUN /opt/hermes/.venv/bin/python /opt/hermes/scripts/build_rule_artifacts.py && \
+    chown -R root:root /etc/claude-code /etc/data/codex && \
+    chown root:hermes /etc/data/codex && \
+    chmod 0555 /etc/claude-code && \
+    chmod 1770 /etc/data/codex && \
+    chmod 0444 /etc/claude-code/CLAUDE.md /etc/data/codex/AGENTS.md
 # The ``.install_method`` stamp is baked next to the running code (the install
 # tree), NOT into $HERMES_HOME. $HERMES_HOME (/opt/data) is a shared data
 # volume that is commonly bind-mounted from the host and even shared with a
@@ -432,8 +438,8 @@ COPY --chmod=0755 docker/entrypoint-dispatch.sh /opt/hermes/docker/entrypoint-di
 # binary by absolute path, so this PATH ordering is transparent to
 # every other consumer.
 ENV PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:${PATH}"
-RUN mkdir -p /opt/data /etc/data/codex
-VOLUME [ "/opt/data", "/etc/data/codex" ]
+RUN mkdir -p /opt/data
+VOLUME [ "/opt/data" ]
 
 # The image ENTRYPOINT is a tiny dispatcher rather than `/init` directly.
 # When the image really owns PID 1 (normal Docker / Podman), the dispatcher
