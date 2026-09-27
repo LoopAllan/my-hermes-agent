@@ -91,7 +91,7 @@ def _decode_go_quoted(value: str) -> str:
 def read_marketplace_token(path: Path) -> str:
     """Parse one safe shell-escaped (``%q``) token from a Vault env file."""
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
     except OSError as exc:
         raise RuntimeError("MARKETPLACE_VAULT_ENV_FILE is unreadable") from exc
 

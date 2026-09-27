@@ -128,6 +128,13 @@ def test_token_parser_rejects_go_escaped_newline_after_decoding(tmp_path: Path) 
         read_marketplace_token(vault)
 
 
+def test_token_parser_accepts_bom_prefixed_vault_env_file(tmp_path: Path) -> None:
+    vault = tmp_path / "vault.env"
+    vault.write_text('MARKETPLACE_GIT_AUTH_TOKEN="bom-safe"\n', encoding="utf-8-sig")
+
+    assert read_marketplace_token(vault) == "bom-safe"
+
+
 def test_bootstrap_parent_symlink_swap_cannot_redirect_clone_or_deletion(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
