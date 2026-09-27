@@ -217,9 +217,10 @@ jobs:
           else
             # A fork with no published release has no OLD version to upgrade
             # from. Keep the PR path green rather than treating that absence
-            # as a selector failure; stable-release calls still require tags.
+            # as a selector failure; the PR matrix retains its PR-to-NEXT
+            # legs. Stable-release calls still require tags.
             tags='[]'
-            echo 'No published release tags; install/update PR matrix is empty.'
+            echo 'No published release tags; omit OLD release baselines.'
           fi
           echo "Testing updates from: $tags"
           # Annotate each tag with what its own tree supports, so run
