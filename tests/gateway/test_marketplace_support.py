@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import hermes_yaml as yaml
 
 import gateway.marketplace_bootstrap as marketplace_bootstrap
 from gateway.marketplace_config import (
@@ -69,8 +70,6 @@ def test_config_loader_rejects_invalid_enabled_configuration(tmp_path: Path) -> 
 def test_file_loader_reads_only_config_yaml_marketplace_settings(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import yaml
-
     home = tmp_path / "home"
     home.mkdir()
     expected = _settings(tmp_path / "repo")

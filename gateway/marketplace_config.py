@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-import yaml
+import hermes_yaml as yaml
 
 
 class MarketplaceConfigError(ValueError):
