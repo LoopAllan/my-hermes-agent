@@ -6,7 +6,7 @@ set -eu
 CODEX_HOME=/etc/data/codex
 
 if [ -d "$CODEX_HOME" ]; then
-    find "$CODEX_HOME" -mindepth 1 -maxdepth 1 ! -name AGENTS.md ! -type l -exec chown -R hermes:hermes {} + 2>/dev/null || \
+    find "$CODEX_HOME" -mindepth 1 -maxdepth 1 ! -name AGENTS.md ! -type l -exec chown -h hermes:hermes {} + 2>/dev/null || \
         echo "[allan-codex-init] Warning: chown Codex runtime state failed (rootless container?) — continuing"
     if [ -f "$CODEX_HOME/AGENTS.md" ]; then
         chown root:root "$CODEX_HOME/AGENTS.md" 2>/dev/null || true

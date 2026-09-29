@@ -38,14 +38,28 @@ def test_allan_derived_image_preserves_immutable_codex_rules(
 
     docker_exec_sh(
         container_name,
-        "touch /etc/data/codex/auth.json && chown root:root /etc/data/codex/auth.json",
+        "mkdir -p /etc/data/codex/nested /tmp/codex-link-target && "
+        "touch /etc/data/codex/auth.json /etc/data/codex/nested/state "
+        "/tmp/codex-link-target/state && "
+        "ln -s /tmp/codex-link-target/state /etc/data/codex/link && "
+        "chown -R root:root /etc/data/codex/auth.json "
+        "/etc/data/codex/nested /tmp/codex-link-target",
         user="root",
     )
     restart_container(container_name)
 
     repaired = docker_exec_sh(
         container_name,
-        "stat -c '%U:%G %a' /etc/data/codex/auth.json /etc/data/codex/AGENTS.md",
+        "stat -c '%U:%G %a' /etc/data/codex/auth.json "
+        "/etc/data/codex/nested/state /etc/data/codex/link "
+        "/etc/data/codex/AGENTS.md && "
+        "stat -Lc '%U:%G %a' /etc/data/codex/link",
         user="root",
     )
-    assert repaired.stdout.splitlines() == ["hermes:hermes 644", "root:root 444"]
+    assert repaired.stdout.splitlines() == [
+        "hermes:hermes 644",
+        "root:root 644",
+        "root:root 777",
+        "root:root 444",
+        "root:root 644",
+    ]

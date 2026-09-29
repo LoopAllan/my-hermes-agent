@@ -1,9 +1,4 @@
-"""Contract tests for Docker's shared Codex auth mount.
-
-The hosted/profile-deployment layout keeps each profile's Hermes home mounted
-at /opt/data, while sharing Codex CLI auth through a separate mount. These
-static tests guard the container/deployment contracts without requiring Docker.
-"""
+"""Contracts separating Allan's shared Codex runtime from the core image."""
 
 from __future__ import annotations
 
@@ -17,59 +12,44 @@ DOCKERFILE = REPO_ROOT / "Dockerfile"
 STAGE2_HOOK = REPO_ROOT / "docker" / "stage2-hook.sh"
 COMPOSE = REPO_ROOT / "docker-compose.yml"
 COMPOSE_WINDOWS = REPO_ROOT / "docker-compose.windows.yml"
-
-
-def test_docker_image_defaults_codex_home_to_shared_mount() -> None:
-    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
-
-    assert "ENV CODEX_HOME=/etc/data/codex" in dockerfile, (
-        "Docker image should default Codex CLI auth to a mount outside /opt/data "
-        "so /opt/data can remain the per-profile Hermes home."
-    )
-
-
-def test_stage2_hook_preserves_the_root_owned_codex_rules_artifact() -> None:
-    hook = STAGE2_HOOK.read_text(encoding="utf-8")
-
-    assert 'CODEX_HOME="${CODEX_HOME:-/etc/data/codex}"' in hook
-    assert 'mkdir -p "$CODEX_HOME"' in hook
-    assert 'chown_hermes_tree "$CODEX_HOME"' not in hook
-    assert 'find "$CODEX_HOME" -mindepth 1 -maxdepth 1 ! -name AGENTS.md' in hook
-    assert 'chown root:root "$CODEX_HOME/AGENTS.md"' in hook
-    assert 'chmod 0444 "$CODEX_HOME/AGENTS.md"' in hook
-    assert 'chown root:hermes "$CODEX_HOME"' in hook
-    assert 'chmod 1770 "$CODEX_HOME"' in hook
-    assert 'as_hermes mkdir -p \\' in hook
-    assert '    "$CODEX_HOME" \\' in hook
+ALLAN_HOOK = REPO_ROOT / "docker" / "allan" / "codex-init-hook.sh"
 
 
 def _load_compose(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
-def test_linux_compose_mounts_profile_data_and_shared_codex_auth_separately() -> None:
-    compose = _load_compose(COMPOSE)
+def test_core_image_has_no_allan_shared_codex_runtime_contract() -> None:
+    """The reusable core must not own Allan's shared OAuth state."""
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    hook = STAGE2_HOOK.read_text(encoding="utf-8")
 
-    for service_name in ("gateway", "dashboard"):
-        service = compose["services"][service_name]
-        volumes = service.get("volumes", [])
-        environment = service.get("environment", [])
-
-        assert "${HERMES_PROFILE_DATA:-~/.hermes}:/opt/data" in volumes
-        assert "${HERMES_SHARED_CODEX_DIR:-~/.codex}/auth.json:/etc/data/codex/auth.json" in volumes
-        assert "${HERMES_SHARED_CODEX_DIR:-~/.codex}:/etc/data/codex" not in volumes
-        assert "CODEX_HOME=/etc/data/codex" in environment
+    assert "ENV CODEX_HOME=/etc/data/codex" not in dockerfile
+    assert "/etc/data/codex" not in dockerfile
+    assert "CODEX_HOME" not in hook
 
 
-def test_windows_compose_mounts_profile_data_and_shared_codex_auth_separately() -> None:
-    compose = _load_compose(COMPOSE_WINDOWS)
+def test_core_compose_examples_do_not_mount_allan_shared_codex_auth() -> None:
+    """Generic Compose examples retain only their per-profile Hermes home."""
+    for path, profile_mount in (
+        (COMPOSE, "${HERMES_PROFILE_DATA:-~/.hermes}:/opt/data"),
+        (COMPOSE_WINDOWS, "${HERMES_PROFILE_DATA:-${USERPROFILE}/.hermes}:/opt/data"),
+    ):
+        compose = _load_compose(path)
+        for service_name in ("gateway", "dashboard"):
+            service = compose["services"][service_name]
+            volumes = service.get("volumes", [])
+            environment = service.get("environment", [])
 
-    for service_name in ("gateway", "dashboard"):
-        service = compose["services"][service_name]
-        volumes = service.get("volumes", [])
-        environment = service.get("environment", [])
+            assert profile_mount in volumes
+            assert not any("/etc/data/codex" in volume for volume in volumes)
+            assert "CODEX_HOME=/etc/data/codex" not in environment
 
-        assert "${HERMES_PROFILE_DATA:-${USERPROFILE}/.hermes}:/opt/data" in volumes
-        assert "${HERMES_SHARED_CODEX_DIR:-${USERPROFILE}/.codex}/auth.json:/etc/data/codex/auth.json" in volumes
-        assert "${HERMES_SHARED_CODEX_DIR:-${USERPROFILE}/.codex}:/etc/data/codex" not in volumes
-        assert "CODEX_HOME=/etc/data/codex" in environment
+
+def test_allan_hook_uses_non_dereferencing_ownership_updates() -> None:
+    """A path swapped for a symlink cannot redirect the ownership operation."""
+    hook = ALLAN_HOOK.read_text(encoding="utf-8")
+
+    assert "! -type l" in hook
+    assert "-exec chown -h hermes:hermes {} +" in hook
+    assert "chown -R" not in hook
