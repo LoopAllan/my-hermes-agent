@@ -61,18 +61,29 @@ def test_generator_rejects_missing_or_empty_rule_sources(tmp_path: Path) -> None
     assert not codex.exists()
 
 
-def test_dockerfile_builds_root_owned_artifacts_without_runtime_rule_setup() -> None:
+def test_core_and_allan_images_keep_codex_contracts_separate() -> None:
+    """Core builds Claude rules only; the derived image owns Codex state/rules."""
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    allan_dockerfile = (REPO_ROOT / "Dockerfile.allan").read_text(encoding="utf-8")
+    core_hook = (REPO_ROOT / "docker" / "stage2-hook.sh").read_text(encoding="utf-8")
+    allan_hook = (REPO_ROOT / "docker" / "allan" / "codex-init-hook.sh").read_text(encoding="utf-8")
 
     assert "scripts/build_rule_artifacts.py" in dockerfile
     assert "/etc/claude-code/CLAUDE.md" in dockerfile
-    assert "chmod 0444 /etc/claude-code/CLAUDE.md /etc/data/codex/AGENTS.md" in dockerfile
-    assert "chown root:hermes /etc/data/codex" in dockerfile
+    assert "/etc/data/codex" not in dockerfile
+    assert "CODEX_HOME" not in core_hook
+    assert "mkdir -p \"$CODEX_HOME\"" not in core_hook
     assert "chmod 0555 /etc/claude-code" in dockerfile
-    assert "chmod 1770 /etc/data/codex" in dockerfile
     assert "!docker/rules/**/*.md" in DOCKERIGNORE.read_text(encoding="utf-8")
     assert "VOLUME [ \"/opt/data\" ]" in dockerfile
-    assert '"/etc/data/codex"' not in dockerfile.split("VOLUME", 1)[1]
+
+    assert "--codex-output /etc/data/codex/AGENTS.md" in allan_dockerfile
+    assert "ENV CODEX_HOME=/etc/data/codex" in allan_dockerfile
+    assert "codex-init-hook.sh" in allan_dockerfile
+    assert "-mindepth 1 -maxdepth 1 ! -name AGENTS.md" in allan_hook
+    assert "! -type l" in allan_hook
+    assert "chmod 0444 \"$CODEX_HOME/AGENTS.md\"" in allan_hook
+    assert "chmod 1770 \"$CODEX_HOME\"" in allan_hook
     assert "llm_rule_setup.sh" not in dockerfile
     assert "03-llm-rule-setup" not in dockerfile
 

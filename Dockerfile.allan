@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # Allan-specific extension image. The upstream-compatible Hermes image remains
-# unchanged; customize this package list instead of mutating Hermes core.
+# free of Allan's shared Codex OAuth and instruction-file contract.
 ARG BASE_IMAGE=ghcr.io/loopallan/my-hermes-agent:main
 FROM ${BASE_IMAGE}
 
@@ -11,3 +11,16 @@ RUN set -eux; \
     grep -Ev '^[[:space:]]*(#|$)' /tmp/allan-apt-packages.txt | \
       xargs --no-run-if-empty apt-get install --yes --no-install-recommends; \
     rm -rf /var/lib/apt/lists/* /tmp/allan-apt-packages.txt
+
+# Allan deployments share Codex OAuth state outside their per-profile
+# HERMES_HOME mount. The rules file stays root-owned and immutable; only the
+# derived cont-init hook repairs first-level mutable Codex state at startup.
+RUN mkdir -p /etc/data/codex && \
+    /opt/hermes/.venv/bin/python /opt/hermes/scripts/build_rule_artifacts.py \
+        --codex-output /etc/data/codex/AGENTS.md && \
+    chown root:root /etc/data/codex/AGENTS.md && \
+    chown root:hermes /etc/data/codex && \
+    chmod 1770 /etc/data/codex && \
+    chmod 0444 /etc/data/codex/AGENTS.md
+COPY --chmod=0755 docker/allan/codex-init-hook.sh /etc/cont-init.d/016-allan-codex-runtime
+ENV CODEX_HOME=/etc/data/codex

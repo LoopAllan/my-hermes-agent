@@ -5,9 +5,7 @@
 #   - Removes `network_mode: host` (not supported on Docker Desktop for Windows)
 #   - Uses explicit port mappings instead
 #   - Uses Windows-style volume path for ~/.hermes
-#   - Supports HERMES_PROFILE_DATA for the per-deployment /opt/data mount and
-#     HERMES_SHARED_CODEX_DIR for a shared Codex CLI auth.json mount; create
-#     that file first with `codex login` so the image's shared rules stay visible
+#   - Supports HERMES_PROFILE_DATA for the per-deployment /opt/data mount
 #
 # Usage:
 #   docker compose -f docker-compose.windows.yml up -d
@@ -19,11 +17,9 @@ services:
     restart: unless-stopped
     volumes:
       - ${HERMES_PROFILE_DATA:-${USERPROFILE}/.hermes}:/opt/data
-      - ${HERMES_SHARED_CODEX_DIR:-${USERPROFILE}/.codex}/auth.json:/etc/data/codex/auth.json
     environment:
       - HERMES_UID=10000
       - HERMES_GID=10000
-      - CODEX_HOME=/etc/data/codex
     command: ["gateway", "run"]
 
   dashboard:
@@ -34,11 +30,9 @@ services:
       - gateway
     volumes:
       - ${HERMES_PROFILE_DATA:-${USERPROFILE}/.hermes}:/opt/data
-      - ${HERMES_SHARED_CODEX_DIR:-${USERPROFILE}/.codex}/auth.json:/etc/data/codex/auth.json
     environment:
       - HERMES_UID=10000
       - HERMES_GID=10000
-      - CODEX_HOME=/etc/data/codex
       - HERMES_DASHBOARD_HOST=0.0.0.0
     ports:
       - "127.0.0.1:9119:9119"
