@@ -252,6 +252,17 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Fetch and verify release baseline
+        # actions/checkout can leave tags absent even with fetch-depth: 0 on a
+        # pull-request merge ref. Upgrade tests deliberately derive N-1 from a
+        # reachable release tag, so fetch tags explicitly and fail before the
+        # expensive shards when that invariant is not met.
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          baseline="$(git describe --tags --abbrev=0 --match 'v20[0-9][0-9].*' HEAD~1)"
+          printf 'upgrade baseline: %s\n' "$baseline"
+
       - name: Set up Node
         # `hermes update` builds the web UI / TUI workspaces.
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

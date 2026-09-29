@@ -84,7 +84,6 @@ def _explode_runtime_resolution():
 
 def test_run_agent_prefers_session_override_over_global_runtime(monkeypatch):
     monkeypatch.setattr(gateway_run, "_load_gateway_config", lambda: {})
-    monkeypatch.setattr(gateway_run, "load_dotenv", lambda *args, **kwargs: None)
     monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
 
     fake_run_agent = types.ModuleType("run_agent")
@@ -132,7 +131,6 @@ def test_run_agent_applies_message_alias_to_current_turn(monkeypatch):
         "_load_gateway_config",
         lambda: {"model": {"message_aliases": {"Sol": {"model": "gpt5.6-sol"}}}},
     )
-    monkeypatch.setattr(gateway_run, "load_dotenv", lambda *args, **kwargs: None)
     monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
 
     fake_run_agent = types.ModuleType("run_agent")
