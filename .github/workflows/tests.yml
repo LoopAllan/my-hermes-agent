@@ -253,13 +253,13 @@ jobs:
           fetch-tags: true
 
       - name: Fetch and verify release baseline
-        # actions/checkout can leave tags absent even with fetch-depth: 0 on a
-        # pull-request merge ref. Upgrade tests deliberately derive N-1 from a
-        # reachable release tag, so fetch tags explicitly and fail before the
-        # expensive shards when that invariant is not met.
+        # Forks need the canonical release tags as well as their own tags.
+        # actions/checkout only fetches from the repository running the job,
+        # whose tag namespace may contain no v20xx release at all.
         run: |
           set -euo pipefail
-          git fetch --force --tags origin
+          git fetch --force https://github.com/NousResearch/hermes-agent.git \
+            'refs/tags/v20*:refs/tags/v20*'
           baseline="$(git describe --tags --abbrev=0 --match 'v20[0-9][0-9].*' HEAD~1)"
           printf 'upgrade baseline: %s\n' "$baseline"
 

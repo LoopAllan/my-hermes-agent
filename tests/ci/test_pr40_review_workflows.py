@@ -24,7 +24,8 @@ def test_full_python_suite_and_e2e_are_preserved():
         step for step in upgrade['steps']
         if step.get('name') == 'Fetch and verify release baseline'
     )
-    assert 'git fetch --force --tags origin' in baseline_step['run']
+    assert 'https://github.com/NousResearch/hermes-agent.git' in baseline_step['run']
+    assert "'refs/tags/v20*:refs/tags/v20*'" in baseline_step['run']
     assert "git describe --tags --abbrev=0 --match 'v20[0-9][0-9].*' HEAD~1" in baseline_step['run']
     assert workflow('ci.yaml')['jobs']['tests']['uses'] == './.github/workflows/tests.yml'
 
