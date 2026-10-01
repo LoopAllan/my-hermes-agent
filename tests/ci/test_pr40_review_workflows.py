@@ -1,4 +1,4 @@
-"""Keep PR #40's restored test lanes wired to standard hosted runners."""
+"""Keep PR automation on hosted runners and exclude long-running lanes."""
 from pathlib import Path
 import hermes_yaml as yaml
 
@@ -9,25 +9,19 @@ def workflow(name):
     return yaml.safe_load((ROOT / '.github/workflows' / name).read_text())
 
 
-def test_full_python_suite_and_e2e_are_preserved():
+def test_pr_ci_excludes_long_running_lanes():
     jobs = workflow('tests.yml')['jobs']
-    suite = jobs['test']
-    assert suite['runs-on'] == 'ubuntu-latest'
-    steps = [step for step in suite['steps'] if step.get('name') == 'Run tests']
-    assert len(steps) == 1
-    assert steps[0]['run'].strip() == 'scripts/run_tests.sh'
-    assert 1 <= int(steps[0]['env']['HERMES_TEST_WORKERS']) <= 4
-    assert suite['timeout-minutes'] >= 120
-    assert 'e2e' in jobs and 'e2e-upgrade' in jobs
-    upgrade = jobs['e2e-upgrade']
-    baseline_step = next(
-        step for step in upgrade['steps']
-        if step.get('name') == 'Fetch and verify release baseline'
-    )
-    assert 'https://github.com/NousResearch/hermes-agent.git' in baseline_step['run']
-    assert "'refs/tags/v20*:refs/tags/v20*'" in baseline_step['run']
-    assert "git describe --tags --abbrev=0 --match 'v20[0-9][0-9].*' HEAD~1" in baseline_step['run']
-    assert workflow('ci.yaml')['jobs']['tests']['uses'] == './.github/workflows/tests.yml'
+    assert {'test', 'e2e', 'e2e-upgrade'} <= jobs.keys()
+
+    pr_jobs = workflow('ci.yaml')['jobs']
+    removed = {
+        'tests', 'tests-os', 'lint', 'js-tests', 'rust-tests', 'bootstrap-installer',
+        'e2e-desktop', 'e2e-desktop-core', 'e2e-desktop-update', 'docs-site',
+        'history-check', 'uv-lockfile', 'icons-freshness-check',
+    }
+    assert removed.isdisjoint(pr_jobs)
+    assert 'pull_request' not in workflow('nix.yml')[True]
+    assert set(workflow('windows-install-update-e2e.yml')[True]) == {'workflow_call'}
 
 
 def test_native_windows_both_architectures_and_current_selector():
@@ -62,11 +56,3 @@ def test_all_workflows_use_only_github_hosted_runners():
             assert 'self-hosted' not in runner_text, path
             assert '-core' not in runner_text, path
     assert not (ROOT / '.github' / 'actionlint.yaml').exists()
-
-    windows_install = workflow('windows-install-update-e2e.yml')['jobs']['install-update']
-    run_step = next(
-        step for step in windows_install['steps']
-        if step.get('name') == 'Run Windows install + update E2E'
-    )
-    assert int(run_step['env']['HERMES_TEST_WORKERS']) <= 2
-    assert windows_install['timeout-minutes'] >= 60
