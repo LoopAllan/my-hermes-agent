@@ -62,3 +62,11 @@ def test_all_workflows_use_only_github_hosted_runners():
             assert 'self-hosted' not in runner_text, path
             assert '-core' not in runner_text, path
     assert not (ROOT / '.github' / 'actionlint.yaml').exists()
+
+    windows_install = workflow('windows-install-update-e2e.yml')['jobs']['install-update']
+    run_step = next(
+        step for step in windows_install['steps']
+        if step.get('name') == 'Run Windows install + update E2E'
+    )
+    assert int(run_step['env']['HERMES_TEST_WORKERS']) <= 2
+    assert windows_install['timeout-minutes'] >= 60
