@@ -137,7 +137,7 @@ class TestExecuteCodeIntegration:
 
     def test_execute_code_preserves_only_agent_github_token(self):
         """execute_code receives the dedicated agent token, not other auth."""
-        from tools.code_execution_tool import _scrub_child_env
+        from tools.code_execution_env import _scrub_child_env
 
         child_env = _scrub_child_env({
             "PATH": "/usr/bin",

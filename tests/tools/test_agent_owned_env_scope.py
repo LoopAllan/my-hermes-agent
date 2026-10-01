@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agent import secret_scope
-from tools.code_execution_tool import _scrub_child_env
+from tools.code_execution_env import _scrub_child_env
 from tools.environments.local import _make_run_env, hermes_subprocess_env
 
 

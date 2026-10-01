@@ -5,7 +5,11 @@ import os
 import subprocess
 from pathlib import Path
 
-import yaml
+import hermes_yaml as yaml
+import pytest
+
+
+pytestmark = pytest.mark.platforms("linux")
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +37,7 @@ def _run_script(
     fake_git.write_text(
         "#!/bin/sh\n"
         "set -eu\n"
+        "test \"${1:-}\" = clone || exit 127\n"
         "printf '%s\\n' \"$*\" >> \"$GIT_LOG\"\n"
         "test \"$GIT_TERMINAL_PROMPT\" = 0\n"
         "stat -c '%a' \"$GIT_ASKPASS\" > \"$CREDENTIAL_MODE\"\n"

@@ -6,7 +6,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
-import yaml
+import hermes_yaml as yaml
 
 
 _SCRIPT = Path(__file__).resolve().parents[2] / ".github" / "scripts" / "promote_allan_hermes_gitops.py"
