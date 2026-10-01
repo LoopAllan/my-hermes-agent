@@ -79,8 +79,8 @@ def test_workflow_runs_after_successful_main_base_image_publish():
     ("content", "digest", "error"),
     [
         (_PROFILE.replace("allan-hermes-agent", "wrong-image"), "sha256:" + "a" * 64, "expected allan-hermes-agent profile image"),
-        (_PROFILE.replace("    pullPolicy", "    digest: sha256:" + "2" * 64 + "\n    pullPolicy"), "sha256:" + "a" * 64, "duplicate YAML key: digest"),
-        (_PROFILE.replace("    pullPolicy", "    digest : sha256:" + "2" * 64 + "\n    pullPolicy"), "sha256:" + "a" * 64, "duplicate YAML key: digest"),
+        (_PROFILE.replace("    pullPolicy", "    digest: sha256:" + "2" * 64 + "\n    pullPolicy"), "sha256:" + "a" * 64, "found duplicate key"),
+        (_PROFILE.replace("    pullPolicy", "    digest : sha256:" + "2" * 64 + "\n    pullPolicy"), "sha256:" + "a" * 64, "found duplicate key"),
         (_PROFILE, "sha256:ABC", "image digest must be"),
     ],
 )
