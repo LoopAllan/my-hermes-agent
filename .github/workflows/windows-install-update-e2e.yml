@@ -7,11 +7,13 @@ name: Windows install + update E2E
 # Each file walks one journey (one install) and asserts several user-visible cells;
 # tracked bugs are message-gated xfails (tests/e2e/core/_pending_fixes.py).
 #
-# Available only as a reusable workflow. It is intentionally not wired into
-# pull requests or push events because a real install/update run takes minutes.
+# Called from tests-os.yml on every Python PR. Pushes to wine2e-install/** run it alone,
+# for sabotage proofs and iteration without the rest of CI.
 
 on:
   workflow_call:
+  push:
+    branches: ['wine2e-install/**']
 
 permissions:
   contents: read

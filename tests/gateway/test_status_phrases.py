@@ -2,6 +2,7 @@ import random
 
 from gateway.status_phrases import (
     choose_status_phrase,
+    has_configured_status_phrase_catalog,
     resolve_status_phrase_catalog,
 )
 
@@ -36,8 +37,9 @@ def test_status_phrase_path_can_load_relative_directory(tmp_path, monkeypatch):
 
 
 def test_choose_status_phrase_uses_custom_catalog_without_leaking_args():
+    config = {"display": {"status_phrases": {"mode": "replace", "status": ["custom safe status text"]}}}
     catalog = resolve_status_phrase_catalog(
-        {"display": {"status_phrases": {"mode": "replace", "status": ["custom safe status text"]}}},
+        config,
         "whatsapp",
     )
 
@@ -49,3 +51,4 @@ def test_choose_status_phrase_uses_custom_catalog_without_leaking_args():
 
     assert msg == "custom safe status text"
     assert "SECRET" not in msg
+    assert has_configured_status_phrase_catalog(config, "whatsapp") is True

@@ -4552,6 +4552,7 @@ class GatewayRunner(
         _native_slack_task_cards: Any = None
         needs_progress_queue: Any = None
         _generic_status_phrase: Any = None
+        _custom_status_phrases_configured: bool = False
 
     @dataclasses.dataclass
     class _RunAgentWorker:

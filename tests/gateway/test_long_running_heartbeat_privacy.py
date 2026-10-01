@@ -91,3 +91,36 @@ async def test_heartbeat_detail_requires_literal_true(monkeypatch):
 
     assert "private-tool" in adapter.send.await_args.args[1]
     activity.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_explicit_status_catalog_controls_default_heartbeat(monkeypatch):
+    """A documented custom catalog wins without requiring the generic mode."""
+    monkeypatch.setenv("HERMES_AGENT_NOTIFY_INTERVAL", "1")
+    monkeypatch.setattr("gateway.run_turn.asyncio.sleep", AsyncMock())
+    adapter = SimpleNamespace(
+        send=AsyncMock(return_value=SimpleNamespace(success=True, message_id="heartbeat")),
+        edit_message=AsyncMock(return_value=SimpleNamespace(success=True)),
+    )
+    runner = SimpleNamespace(
+        _delivery_adapter_for=lambda source: adapter,
+        _should_emit_long_running_notification=lambda *args: adapter.edit_message.await_count == 0,
+        _agent_activity_summary=Mock(),
+    )
+    disp = SimpleNamespace(
+        _display_surface_mode=lambda *args, **kwargs: "raw",
+        user_config={"display": {"status_phrases": {"status": ["configured"]}}},
+        platform_key="telegram",
+        resolve_display_setting=resolve_display_setting,
+        _generic_status_phrase=lambda kind: "configured",
+        _custom_status_phrases_configured=True,
+    )
+    ctx = SimpleNamespace(
+        source=SimpleNamespace(chat_id="chat", platform=Platform.TELEGRAM), session_key="session",
+        agent_holder=[object()], _status_thread_metadata=None, _cleanup_progress=False, _cleanup_msg_ids=[],
+    )
+
+    await GatewayTurnMixin._run_agent_notify_long_running(runner, disp, ctx, [None])
+
+    assert adapter.send.await_args.args[1] == "configured"
+    assert adapter.edit_message.await_args.args[2] == "configured"

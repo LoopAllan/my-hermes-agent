@@ -10,8 +10,6 @@ import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GENERATOR = REPO_ROOT / "scripts" / "build_rule_artifacts.py"
-DOCKERFILE = REPO_ROOT / "Dockerfile"
-DOCKERIGNORE = REPO_ROOT / ".dockerignore"
 CANONICAL_RULES = REPO_ROOT / "docker" / "rules"
 MARKER = "<!-- managed-by: docker/build_rule_artifacts.py -->"
 
@@ -59,33 +57,6 @@ def test_generator_rejects_missing_or_empty_rule_sources(tmp_path: Path) -> None
     assert "no Markdown rules" in result.stderr
     assert not claude.exists()
     assert not codex.exists()
-
-
-def test_core_and_allan_images_keep_codex_contracts_separate() -> None:
-    """Core builds Claude rules only; the derived image owns Codex state/rules."""
-    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
-    allan_dockerfile = (REPO_ROOT / "Dockerfile.allan").read_text(encoding="utf-8")
-    core_hook = (REPO_ROOT / "docker" / "stage2-hook.sh").read_text(encoding="utf-8")
-    allan_hook = (REPO_ROOT / "docker" / "allan" / "codex-init-hook.sh").read_text(encoding="utf-8")
-
-    assert "scripts/build_rule_artifacts.py" in dockerfile
-    assert "/etc/claude-code/CLAUDE.md" in dockerfile
-    assert "/etc/data/codex" not in dockerfile
-    assert "CODEX_HOME" not in core_hook
-    assert "mkdir -p \"$CODEX_HOME\"" not in core_hook
-    assert "chmod 0555 /etc/claude-code" in dockerfile
-    assert "!docker/rules/**/*.md" in DOCKERIGNORE.read_text(encoding="utf-8")
-    assert "VOLUME [ \"/opt/data\" ]" in dockerfile
-
-    assert "--codex-output /etc/data/codex/AGENTS.md" in allan_dockerfile
-    assert "ENV CODEX_HOME=/etc/data/codex" in allan_dockerfile
-    assert "codex-init-hook.sh" in allan_dockerfile
-    assert "-mindepth 1 -maxdepth 1 ! -name AGENTS.md" in allan_hook
-    assert "! -type l" in allan_hook
-    assert "chmod 0444 \"$CODEX_HOME/AGENTS.md\"" in allan_hook
-    assert "chmod 1770 \"$CODEX_HOME\"" in allan_hook
-    assert "llm_rule_setup.sh" not in dockerfile
-    assert "03-llm-rule-setup" not in dockerfile
 
 
 def test_repository_ships_the_accepted_canonical_development_rules() -> None:

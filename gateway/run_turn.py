@@ -2961,7 +2961,11 @@ class GatewayTurnMixin:
         )
         from agent.secret_scope import get_secret
         from gateway.display_config import resolve_display_setting, resolve_tool_progress
-        from gateway.status_phrases import choose_status_phrase, resolve_status_phrase_catalog
+        from gateway.status_phrases import (
+            choose_status_phrase,
+            has_configured_status_phrase_catalog,
+            resolve_status_phrase_catalog,
+        )
         user_config = _load_gateway_config()
         platform_key = _platform_config_key(source.platform)
         enabled_toolsets, disabled_toolsets = self._resolve_turn_toolsets(user_config, source, platform_key)
@@ -2986,6 +2990,7 @@ class GatewayTurnMixin:
         progress_grouping = resolve_display_setting(user_config, platform_key, "tool_progress_grouping") or "accumulate"
         _generic_status_recent: List[str] = []
         _generic_status_catalog = resolve_status_phrase_catalog(user_config, platform_key)
+        _custom_status_phrases_configured = has_configured_status_phrase_catalog(user_config, platform_key)
 
         def _display_surface_mode(
             setting: str, *, default: bool = False,
@@ -3065,6 +3070,7 @@ class GatewayTurnMixin:
             _thinking_enabled=_thinking_enabled, _native_slack_task_cards=_native_slack_task_cards,
             needs_progress_queue=tool_progress_enabled or _thinking_enabled or _native_slack_task_cards,
             _generic_status_phrase=_generic_status_phrase,
+            _custom_status_phrases_configured=_custom_status_phrases_configured,
         )
 
     # _RunAgentDisplay fields copied verbatim onto the TurnContext.
@@ -4214,7 +4220,10 @@ class GatewayTurnMixin:
                         _status_detail = " — " + ", ".join(_parts)
             _heartbeat_text = (
                 disp._generic_status_phrase("status")
-                if _long_running_mode == "generic"
+                if (
+                    _long_running_mode == "generic"
+                    or getattr(disp, "_custom_status_phrases_configured", False)
+                )
                 else f"⏳ Working — {_elapsed_mins} min{_status_detail}"
             )
             # Recheck ownership before editing, too.

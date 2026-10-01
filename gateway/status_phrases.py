@@ -129,6 +129,26 @@ def resolve_status_phrase_catalog(user_config: Mapping[str, Any] | None,
     return catalog
 
 
+def has_configured_status_phrase_catalog(user_config: Mapping[str, Any] | None,
+                                         platform_key: str | None = None) -> bool:
+    """Whether this profile/platform explicitly supplies a status phrase catalog.
+
+    Conventional profile files count as explicit operator intent just like the
+    global and per-platform display keys. Built-in phrases alone do not.
+    """
+    hermes_home = get_hermes_home()
+    if any(_iter_phrase_files(hermes_home, path) for path in _CONVENTIONAL_RELATIVE_PATHS):
+        return True
+    display = (user_config or {}).get("display") if isinstance(user_config, Mapping) else None
+    if not isinstance(display, Mapping):
+        return False
+    sections: list[Mapping[str, Any]] = [display]
+    platforms = display.get("platforms")
+    if platform_key and isinstance(platforms, Mapping) and isinstance(platforms.get(platform_key), Mapping):
+        sections.append(platforms[platform_key])
+    return any(section.get(key) is not None for section in sections for key in _CONFIG_KEYS)
+
+
 def classify_status_context(kind: str, *, tool_name: str | None = None, preview: str | None = None,
                             args: Any = None) -> str:
     """Classify an internal gateway event into a Hermes UI-surface bucket."""
