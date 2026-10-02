@@ -117,7 +117,13 @@ class MarketplaceBootstrap:
             os.rename(final_name, retired, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
         except FileNotFoundError:
             retired = ""
-        os.replace(temporary_name, final_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        try:
+            os.replace(temporary_name, final_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        except BaseException:
+            if retired:
+                # Put the served checkout back; the caller removes the unused clone.
+                os.rename(retired, final_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+            raise
         if not retired:
             return
         if stat.S_ISLNK(os.stat(retired, dir_fd=parent_fd, follow_symlinks=False).st_mode):

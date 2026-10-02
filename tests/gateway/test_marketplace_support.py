@@ -374,3 +374,43 @@ def test_failed_checkout_swap_leaves_the_profile_soul_untouched(
 
     assert (home / "SOUL.md").read_text(encoding="utf-8") == "old soul"
     assert sorted(p.name for p in home.iterdir()) == ["SOUL.md", "marketplace"]
+
+
+@pytest.mark.platforms("linux")
+def test_failed_swap_restores_the_retired_checkout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """If installing the new clone fails after the old one was moved aside, the old one comes back."""
+    home = tmp_path / "home"
+    repository = home / "marketplace" / "repository"
+    (repository / "plugins" / "skills").mkdir(parents=True)
+    (repository / "plugins" / "skills" / "SKILL.md").write_text("serving", encoding="utf-8")
+    config = load_marketplace_config(_settings(repository), require_bootstrap=True)
+    assert config is not None
+
+    class FakeGitAuth:
+        def __enter__(self) -> dict[str, str]:
+            return {}
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def fake_clone(args: list[str], **kwargs: object) -> None:
+        target = Path(args[-1])
+        (target / "plugins" / "skills").mkdir(parents=True)
+        (target / "SOUL.md").write_text("new soul", encoding="utf-8")
+
+    real_replace = marketplace_bootstrap.os.replace
+
+    def failing_install(src: str, dst: str, **kwargs: object) -> None:
+        if ".marketplace-clone-" in str(src):
+            raise OSError("destination raced")
+        real_replace(src, dst, **kwargs)
+
+    monkeypatch.setattr(marketplace_bootstrap.GitAuthEnvironment, "from_vault", lambda: FakeGitAuth())
+    monkeypatch.setattr(marketplace_bootstrap.subprocess, "run", fake_clone)
+    monkeypatch.setattr(marketplace_bootstrap.os, "replace", failing_install)
+
+    with pytest.raises(OSError, match="destination raced"):
+        marketplace_bootstrap.MarketplaceBootstrap(home, config).run()
+
+    assert (repository / "plugins" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "serving"
+    assert [p.name for p in repository.parent.iterdir()] == ["repository"]
