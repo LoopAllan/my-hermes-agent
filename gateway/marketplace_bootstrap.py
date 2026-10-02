@@ -68,6 +68,15 @@ class MarketplaceBootstrap:
                     # SOUL.md and the checkout commit together: stage the identity, swap the
                     # checkout, then publish the identity; a failed swap commits neither.
                     staged_soul = self._stage_soul(clone_dir / "SOUL.md", soul_target)
+                    # The clone took a while: re-check, so work done meanwhile is never retired.
+                    local_state = self._local_state(parent_fd, final_name)
+                    if local_state:
+                        staged_soul.unlink(missing_ok=True)
+                        print(
+                            f"marketplace bootstrap: warning: keeping {repository_path}; {local_state}",
+                            file=sys.stderr,
+                        )
+                        return
                     try:
                         retired = self._swap_in_clone(parent_fd, temporary_name, final_name)
                         temporary_name = ""

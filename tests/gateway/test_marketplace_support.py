@@ -615,3 +615,43 @@ def test_bootstrap_keeps_state_it_cannot_recreate(
 
     assert sentinel.read_text(encoding="utf-8") == expected
     assert "keeping" in capsys.readouterr().err
+
+
+@pytest.mark.platforms("linux")
+def test_checkout_that_gains_local_state_during_the_clone_is_kept(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Local state is re-checked right before the swap, not only before the (slow) clone."""
+    home = tmp_path / "home"
+    repository = home / "marketplace" / "repository"
+    (repository / "plugins" / "skills").mkdir(parents=True)
+    (repository / "plugins" / "skills" / "SKILL.md").write_text("serving", encoding="utf-8")
+    (home / "SOUL.md").write_text("old soul", encoding="utf-8")
+    config = load_marketplace_config(_settings(repository), require_bootstrap=True)
+    assert config is not None
+    observations = iter(["", "it has local changes"])
+    monkeypatch.setattr(
+        marketplace_bootstrap.MarketplaceBootstrap, "_local_state", classmethod(lambda *a: next(observations))
+    )
+
+    class FakeGitAuth:
+        def __enter__(self) -> dict[str, str]:
+            return {}
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def fake_clone(args: list[str], **kwargs: object) -> None:
+        target = Path(args[-1])
+        (target / "plugins" / "skills").mkdir(parents=True)
+        (target / "SOUL.md").write_text("new soul", encoding="utf-8")
+
+    monkeypatch.setattr(marketplace_bootstrap.GitAuthEnvironment, "from_vault", lambda: FakeGitAuth())
+    monkeypatch.setattr(marketplace_bootstrap.subprocess, "run", fake_clone)
+
+    marketplace_bootstrap.MarketplaceBootstrap(home, config).run()
+
+    assert (repository / "plugins" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "serving"
+    assert (home / "SOUL.md").read_text(encoding="utf-8") == "old soul"
+    assert [p.name for p in repository.parent.iterdir()] == ["repository"]
+    assert "local changes" in capsys.readouterr().err
