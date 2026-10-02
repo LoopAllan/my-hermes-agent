@@ -363,12 +363,11 @@ RUN mkdir -p /opt/hermes/bin && \
     cp /opt/hermes/docker/hermes-exec-shim.sh /opt/hermes/bin/hermes && \
     chmod 0755 /opt/hermes /opt/hermes/bin/hermes && \
     printf 'docker\n' > /opt/hermes/.install_method
-RUN /opt/hermes/.venv/bin/python /opt/hermes/scripts/build_rule_artifacts.py && \
-    chown -R root:root /etc/claude-code /etc/data/codex && \
-    chown root:hermes /etc/data/codex && \
+RUN /opt/hermes/.venv/bin/python /opt/hermes/scripts/build_rule_artifacts.py \
+        --claude-output /etc/claude-code/CLAUDE.md && \
+    chown -R root:root /etc/claude-code && \
     chmod 0555 /etc/claude-code && \
-    chmod 1770 /etc/data/codex && \
-    chmod 0444 /etc/claude-code/CLAUDE.md /etc/data/codex/AGENTS.md
+    chmod 0444 /etc/claude-code/CLAUDE.md
 # The ``.install_method`` stamp is baked next to the running code (the install
 # tree), NOT into $HERMES_HOME. $HERMES_HOME (/opt/data) is a shared data
 # volume that is commonly bind-mounted from the host and even shared with a
@@ -456,10 +455,6 @@ ENV HERMES_TUI_DIR=/opt/hermes/ui-tui
 ENV HERMES_HOME=/opt/data
 ENV HERMES_WRITE_SAFE_ROOT=/opt/data
 ENV HERMES_DISABLE_LAZY_INSTALLS=1
-# Keep Codex CLI OAuth state outside the per-profile /opt/data mount so
-# deployments can mount a distinct host profile directory at /opt/data while
-# sharing one Codex auth volume across profiles.
-ENV CODEX_HOME=/etc/data/codex
 # Unset HERMES_DISABLE_LAZY_INSTALLS to opt in to the upstream PM-managed store.
 # Opt-in backend SDKs install on first use into PM dependency generations under
 # /opt/data/installs (the sealed /opt/hermes/.venv is never written); stage2

@@ -18,7 +18,6 @@
 set -eu
 
 HERMES_HOME="${HERMES_HOME:-/opt/data}"
-CODEX_HOME="${CODEX_HOME:-/etc/data/codex}"
 INSTALL_DIR="/opt/hermes"
 
 # Drop to hermes via s6-setuidgid, but skip it when already non-root.
@@ -85,7 +84,6 @@ fi
 # denied` and the cont-init hook exits non-zero. Idempotent — `mkdir -p`
 # is a no-op if the dir already exists. (#18482, salvages #18488)
 mkdir -p "$HERMES_HOME"
-mkdir -p "$CODEX_HOME"
 
 # Numeric UID/GID validation: must be digits only, non-root, 1-65534.
 # NAS hosts such as Unraid commonly use low non-root IDs (99:100).
@@ -256,25 +254,6 @@ if [ "$needs_chown" = true ]; then
     done
 fi
 
-# Codex CLI auth is intentionally separate from $HERMES_HOME so profile
-# deployments can each mount their own host directory at /opt/data while
-# sharing one Codex OAuth store at CODEX_HOME (default /etc/data/codex).
-#
-# The Docker build installs an immutable AGENTS.md at the default CODEX_HOME.
-# Only the remaining first-level runtime state is Hermes-owned; never recurse
-# through the directory itself or the root-owned shared rules artifact would be
-# silently made mutable before Codex starts.
-if [ -d "$CODEX_HOME" ]; then
-    find "$CODEX_HOME" -mindepth 1 -maxdepth 1 ! -name AGENTS.md -exec chown -R hermes:hermes {} + 2>/dev/null || \
-        echo "[stage2] Warning: chown Codex runtime state failed (rootless container?) — continuing"
-    if [ "$CODEX_HOME" = "/etc/data/codex" ] && [ -f "$CODEX_HOME/AGENTS.md" ]; then
-        chown root:root "$CODEX_HOME/AGENTS.md" 2>/dev/null || true
-        chmod 0444 "$CODEX_HOME/AGENTS.md" 2>/dev/null || true
-        chown root:hermes "$CODEX_HOME" 2>/dev/null || true
-        chmod 1770 "$CODEX_HOME" 2>/dev/null || true
-    fi
-fi
-
 # --- Immutable install tree ---
 # Do not chown runtime code or dependency trees under $INSTALL_DIR back to the
 # hermes user. Hosted/container instances keep mutable state under
@@ -390,7 +369,6 @@ fi
 # shell isn't a second interpreter — defends against $HERMES_HOME values
 # containing shell metacharacters. PR #30136 review item O2.
 as_hermes mkdir -p \
-    "$CODEX_HOME" \
     "$HERMES_HOME/backups" \
     "$HERMES_HOME/cron" \
     "$HERMES_HOME/sessions" \

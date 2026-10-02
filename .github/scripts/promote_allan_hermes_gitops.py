@@ -6,37 +6,18 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
-from typing import Any
 
-import yaml
-from yaml.constructor import ConstructorError
+import hermes_yaml as yaml
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _IMAGE_BLOCK = re.compile(r"(?m)^  image:\n(?P<body>(?:^    [^\n]*\n?)*)")
 _EXPECTED_REPOSITORY = "ghcr.io/loopallan/allan-hermes-agent"
 
 
-class _UniqueKeyLoader(yaml.SafeLoader):
-    """Safe YAML loader that rejects duplicate keys in every mapping."""
-
-
-def _construct_unique_mapping(loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
-    mapping: dict[Any, Any] = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        if key in mapping:
-            raise ConstructorError("while constructing a mapping", node.start_mark, f"duplicate YAML key: {key}", key_node.start_mark)
-        mapping[key] = loader.construct_object(value_node, deep=deep)
-    return mapping
-
-
-_UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping)
-
-
 def _validated_profile_image(content: str) -> dict[str, str]:
     """Parse the profile and verify the only image target accepted for promotion."""
     try:
-        parsed = yaml.load(content, Loader=_UniqueKeyLoader)
+        parsed = yaml.safe_load(content)
     except yaml.YAMLError as exc:
         raise ValueError(str(exc)) from exc
     if not isinstance(parsed, dict):

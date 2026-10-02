@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build immutable Claude and Codex instruction artifacts from canonical rules."""
+"""Build immutable instruction artifacts from canonical rules."""
 
 from __future__ import annotations
 
@@ -71,23 +71,30 @@ def write_readonly(path: Path, content: str) -> None:
     path.chmod(0o444)
 
 
-def build_artifacts(*, rules_dir: Path, claude_output: Path, codex_output: Path) -> None:
+def build_artifacts(
+    *, rules_dir: Path, claude_output: Path | None, codex_output: Path | None,
+) -> None:
     content = aggregate(read_sources(rules_dir))
-    write_readonly(claude_output, content)
-    write_readonly(codex_output, content)
+    if claude_output is not None:
+        write_readonly(claude_output, content)
+    if codex_output is not None:
+        write_readonly(codex_output, content)
 
 
 def parse_args() -> argparse.Namespace:
     repository_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rules-dir", type=Path, default=repository_root / "docker" / "rules")
-    parser.add_argument("--claude-output", type=Path, default=Path("/etc/claude-code/CLAUDE.md"))
-    parser.add_argument("--codex-output", type=Path, default=Path("/etc/data/codex/AGENTS.md"))
+    parser.add_argument("--claude-output", type=Path)
+    parser.add_argument("--codex-output", type=Path)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.claude_output is None and args.codex_output is None:
+        print("[rule-build] ERROR: choose at least one output", file=sys.stderr)
+        return 1
     try:
         build_artifacts(
             rules_dir=args.rules_dir,
@@ -97,8 +104,10 @@ def main() -> int:
     except (OSError, UnicodeError, RuleBuildError) as exc:
         print(f"[rule-build] ERROR: {exc}", file=sys.stderr)
         return 1
-    print(f"[rule-build] installed {args.claude_output}")
-    print(f"[rule-build] installed {args.codex_output}")
+    if args.claude_output is not None:
+        print(f"[rule-build] installed {args.claude_output}")
+    if args.codex_output is not None:
+        print(f"[rule-build] installed {args.codex_output}")
     return 0
 
 

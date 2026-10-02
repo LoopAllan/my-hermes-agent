@@ -42,7 +42,8 @@ def test_compute_host_final_spawn_env_keeps_only_sanitized_credentials(monkeypat
             "GITHUB_TOKEN": "agent-token",
         },
     )
-    monkeypatch.setattr(host_supervisor, "_Thread", _NoopThread)
+    monkeypatch.setattr(host_supervisor.threading, "Thread", _NoopThread)
+
     def spawn(*_args, **kwargs):
         captured["env"] = kwargs["env"]
         return proc

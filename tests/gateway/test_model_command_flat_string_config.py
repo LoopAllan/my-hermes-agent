@@ -151,8 +151,10 @@ async def test_model_reports_session_only_when_global_config_is_read_only(
         {"default": "old-model", "provider": "openai-codex"},
     )
     monkeypatch.setattr(
-        "hermes_cli.config.save_config",
-        lambda _cfg: (_ for _ in ()).throw(OSError(30, "Read-only file system")),
+        "hermes_cli.model_switch.persist_model_selection",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError(30, "Read-only file system")
+        ),
     )
 
     result = await _make_runner()._handle_model_command(
