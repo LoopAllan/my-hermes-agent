@@ -73,3 +73,9 @@ def test_all_workflows_use_only_github_hosted_runners():
     )
     assert int(run_step['env']['HERMES_TEST_WORKERS']) <= 2
     assert windows_install['timeout-minutes'] >= 60
+
+
+def test_fork_image_publishes_main_tags_only_from_main():
+    """A manual dispatch from a feature branch must not overwrite the production ``:main`` image."""
+    for name, job in workflow('fork-ghcr.yml')['jobs'].items():
+        assert job.get('if') == "github.ref == 'refs/heads/main'", name

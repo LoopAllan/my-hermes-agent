@@ -19,6 +19,8 @@ env:
 
 jobs:
   build:
+    # Manual dispatches from other refs would retag ``:main``; only main publishes.
+    if: github.ref == 'refs/heads/main'
     strategy:
       fail-fast: false
       matrix:
@@ -81,6 +83,7 @@ jobs:
           retention-days: 1
 
   merge:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     needs:
       - build
