@@ -381,7 +381,7 @@ def test_failed_checkout_swap_leaves_the_profile_soul_untouched(
         marketplace_bootstrap.MarketplaceBootstrap(home, config).run()
 
     assert (home / "SOUL.md").read_text(encoding="utf-8") == "old soul"
-    assert sorted(p.name for p in home.iterdir()) == ["SOUL.md", "marketplace"]
+    assert sorted(p.name for p in home.iterdir() if p.name != ".marketplace.lock") == ["SOUL.md", "marketplace"]
 
 
 @pytest.mark.platforms("linux")
@@ -707,3 +707,42 @@ def test_bootstrapped_checkout_updates_through_a_custom_remote_name(
 
     assert marketplace_updater.update_marketplace_worktree(settings)
     assert (repository / "plugins" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "v2"
+
+
+def test_marketplace_mutations_wait_for_the_per_home_lock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Services sharing one HERMES_HOME serialize bootstrap and updates instead of interleaving them."""
+    import threading
+
+    from gateway import marketplace_config, marketplace_updater
+
+    home = tmp_path / "home"
+    repository = home / "marketplace" / "repository"
+    repository.mkdir(parents=True)
+    config = load_marketplace_config(_settings(repository), require_bootstrap=True)
+    assert config is not None
+    monkeypatch.setattr(marketplace_config, "_LOCK_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(
+        marketplace_bootstrap.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ran unlocked"))
+    )
+    held, release = threading.Event(), threading.Event()
+
+    def other_service() -> None:
+        with marketplace_config.marketplace_lock(home):
+            held.set()
+            release.wait(10)
+
+    holder = threading.Thread(target=other_service)
+    holder.start()
+    held.wait(10)
+    try:
+        with pytest.raises(TimeoutError):
+            marketplace_bootstrap.MarketplaceBootstrap(home, config).run()
+        monkeypatch.setattr("hermes_constants.get_hermes_home", lambda: home)
+        monkeypatch.setattr(
+            "agent.skill_utils.get_external_skills_dirs",
+            lambda: (_ for _ in ()).throw(AssertionError("update ran unlocked")),
+        )
+        assert not marketplace_updater.update_marketplace_worktree(_settings(repository))
+    finally:
+        release.set()
+        holder.join(10)

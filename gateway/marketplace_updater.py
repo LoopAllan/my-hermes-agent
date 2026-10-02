@@ -10,6 +10,7 @@ from gateway.marketplace_config import (
     MarketplaceConfig,
     MarketplaceConfigError,
     load_marketplace_config,
+    marketplace_lock,
 )
 from gateway.marketplace_credentials import GitAuthEnvironment, marketplace_git_env
 
@@ -111,42 +112,51 @@ def update_marketplace_worktree(config: dict[str, Any]) -> bool:
     settings = marketplace_config(config)
     if not settings:
         return False
-    try:
-        from agent.skill_utils import get_external_skills_dirs
+    from hermes_constants import get_hermes_home
 
-        repo = settings.repo_dir.expanduser().resolve()
-        allowed = {path.resolve() for path in get_external_skills_dirs()}
-        if not any(repo == path or repo in path.parents for path in allowed):
-            logger.warning(
-                "marketplace repo_dir does not contain an external skill directory: %s",
-                repo,
-            )
-            return False
-        if _git(repo, "status", "--porcelain"):
-            logger.warning("marketplace checkout is dirty; refusing update")
-            return False
-        if not _remote_is_configured_repository(repo, settings.remote, settings.repository):
-            logger.warning(
-                "marketplace remote %r is not skills.marketplace.repository; refusing authenticated fetch",
-                settings.remote,
-            )
-            return False
-        _fetch(repo, settings.remote, settings.branch)
-        target = _git(repo, "rev-parse", "FETCH_HEAD")
-        current = _git(repo, "rev-parse", "HEAD")
-        if target == current:
-            return False
-        if _is_ancestor(repo, current, target):
-            if not _skills_root_is_tree(repo, target, settings.skills_path):
-                logger.warning(
-                    "marketplace update %s does not keep %s a real directory; refusing update",
-                    target, settings.skills_path,
-                )
-                return False
-            _git(repo, "merge", "--ff-only", target)
-            logger.info("marketplace advanced to %s", target)
-            return True
-        logger.warning("marketplace checkout diverged; refusing update")
+    try:
+        with marketplace_lock(get_hermes_home()):
+            return _update_locked(settings)
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         logger.warning("marketplace update failed: %s", exc)
+    return False
+
+
+def _update_locked(settings: MarketplaceConfig) -> bool:
+    """Fast-forward under the per-home marketplace lock; never overwrite local state."""
+    from agent.skill_utils import get_external_skills_dirs
+
+    repo = settings.repo_dir.expanduser().resolve()
+    allowed = {path.resolve() for path in get_external_skills_dirs()}
+    if not any(repo == path or repo in path.parents for path in allowed):
+        logger.warning(
+            "marketplace repo_dir does not contain an external skill directory: %s",
+            repo,
+        )
+        return False
+    if _git(repo, "status", "--porcelain"):
+        logger.warning("marketplace checkout is dirty; refusing update")
+        return False
+    if not _remote_is_configured_repository(repo, settings.remote, settings.repository):
+        logger.warning(
+            "marketplace remote %r is not skills.marketplace.repository; refusing authenticated fetch",
+            settings.remote,
+        )
+        return False
+    _fetch(repo, settings.remote, settings.branch)
+    target = _git(repo, "rev-parse", "FETCH_HEAD")
+    current = _git(repo, "rev-parse", "HEAD")
+    if target == current:
+        return False
+    if _is_ancestor(repo, current, target):
+        if not _skills_root_is_tree(repo, target, settings.skills_path):
+            logger.warning(
+                "marketplace update %s does not keep %s a real directory; refusing update",
+                target, settings.skills_path,
+            )
+            return False
+        _git(repo, "merge", "--ff-only", target)
+        logger.info("marketplace advanced to %s", target)
+        return True
+    logger.warning("marketplace checkout diverged; refusing update")
     return False

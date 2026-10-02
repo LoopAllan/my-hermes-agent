@@ -3,13 +3,39 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
 
 import hermes_yaml as yaml
 
 logger = logging.getLogger(__name__)
+
+
+# Bootstrap may wait behind another service's clone of the same shared volume.
+_LOCK_TIMEOUT_SECONDS = 600.0
+_LOCK_HOLDER = threading.local()
+
+
+@contextmanager
+def marketplace_lock(hermes_home: Path) -> Iterator[None]:
+    """Serialize every marketplace mutation (bootstrap, update) for one HERMES_HOME.
+
+    Services sharing the volume (gateway, dashboard) each run the container bootstrap and may
+    run the updater; without this their clean-state checks, swaps and SOUL.md publications
+    interleave. Reuses the cross-process, cross-platform lock the auth store uses.
+    """
+    from hermes_cli.auth import _file_lock
+
+    with _file_lock(
+        Path(hermes_home) / ".marketplace.lock",
+        _LOCK_HOLDER,
+        _LOCK_TIMEOUT_SECONDS,
+        f"timed out waiting for the marketplace lock in {hermes_home}",
+    ):
+        yield
 
 
 class MarketplaceConfigError(ValueError):
