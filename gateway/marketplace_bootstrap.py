@@ -15,7 +15,7 @@ from gateway.marketplace_config import (
     MarketplaceConfigError,
     load_marketplace_config_file,
 )
-from gateway.marketplace_credentials import GitAuthEnvironment
+from gateway.marketplace_credentials import GitAuthEnvironment, marketplace_git_env
 
 _MAX_SOUL_BYTES = 20_000
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
@@ -49,6 +49,14 @@ class MarketplaceBootstrap:
             try:
                 final_name = relative_repository.name
                 self._require_replaceable_repository(parent_fd, final_name)
+                if self._has_local_changes(parent_fd, final_name):
+                    # Same rule as the updater: never overwrite local work in the served checkout.
+                    print(
+                        f"marketplace bootstrap: warning: keeping {repository_path}; "
+                        "it has local changes",
+                        file=sys.stderr,
+                    )
+                    return
                 temporary_name = tempfile.mkdtemp(
                     prefix=".marketplace-clone-", dir=self._fd_path(parent_fd)
                 )
@@ -112,6 +120,24 @@ class MarketplaceBootstrap:
             return
         if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
             raise RuntimeError("marketplace repository directory must be a real directory")
+
+    @classmethod
+    def _has_local_changes(cls, parent_fd: int, final_name: str) -> bool:
+        """True for an existing Git checkout with uncommitted or untracked changes."""
+        checkout = Path(cls._fd_path(parent_fd)) / final_name
+        if not (checkout / ".git").exists():
+            return False
+        # Git resolves /proc/self/fd in its own process, so it must inherit the parent fd.
+        result = subprocess.run(
+            ["git", "-C", str(checkout), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            env=marketplace_git_env(),
+            pass_fds=(parent_fd,),
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
 
     @staticmethod
     def _swap_in_clone(parent_fd: int, temporary_name: str, final_name: str) -> str:

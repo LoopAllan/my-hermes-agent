@@ -517,3 +517,37 @@ def test_failed_soul_publish_rolls_the_checkout_back(monkeypatch: pytest.MonkeyP
     assert (repository / "plugins" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "old"
     assert (home / "SOUL.md").read_text(encoding="utf-8") == "old soul"
     assert [p.name for p in repository.parent.iterdir()] == ["repository"]
+
+
+@pytest.mark.platforms("linux")
+def test_bootstrap_keeps_a_dirty_checkout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Like the updater, a restart never destroys local changes in the served checkout."""
+    import subprocess
+
+    home = tmp_path / "home"
+    repository = home / "marketplace" / "repository"
+    (repository / "plugins" / "skills").mkdir(parents=True)
+    for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        subprocess.run(["git", "-C", str(repository), *args], check=True)
+    (repository / "plugins" / "skills" / "SKILL.md").write_text("committed", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "seed"], check=True)
+    (repository / "plugins" / "skills" / "SKILL.md").write_text("local edit", encoding="utf-8")
+    (home / "SOUL.md").write_text("old soul", encoding="utf-8")
+    config = load_marketplace_config(_settings(repository), require_bootstrap=True)
+    assert config is not None
+    real_run = subprocess.run
+
+    def no_clone(args: list[str], **kwargs: object):
+        assert "clone" not in args, "a dirty checkout must not be replaced"
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(marketplace_bootstrap.subprocess, "run", no_clone)
+
+    marketplace_bootstrap.MarketplaceBootstrap(home, config).run()
+
+    assert (repository / "plugins" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "local edit"
+    assert (home / "SOUL.md").read_text(encoding="utf-8") == "old soul"
+    assert "local changes" in capsys.readouterr().err
