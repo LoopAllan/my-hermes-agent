@@ -168,6 +168,37 @@ def test_run_agent_applies_message_alias_to_current_turn(monkeypatch):
     runner._sync_session_model_from_agent.assert_not_called()
 
 
+def test_one_turn_alias_keeps_the_sessions_warm_agent_cached(monkeypatch):
+    """An aliased turn runs on its own agent; the session's cached agent (prompt-cache prefix) survives."""
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Sol": {"model": "gpt5.6-sol"}}}},
+    )
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+    runner = _make_runner()
+    runner._sync_session_model_from_agent = MagicMock()
+    released = []
+    monkeypatch.setattr(runner, "_release_evicted_agent_soft", released.append)
+    source = SessionSource(platform=Platform.LOCAL, chat_id="cli", chat_name="CLI", chat_type="dm", user_id="user-1")
+    session_key = "agent:main:local:dm"
+    runner._session_model_overrides[session_key] = _codex_override()
+    warm = (object(), "warm-signature", 0, "session-1")
+    runner._agent_cache[session_key] = warm
+
+    asyncio.run(runner._run_agent(
+        message="Sol, inspect the error logs.", context_prompt="", history=[], source=source,
+        session_id="session-1", session_key=session_key,
+    ))
+
+    assert _CapturingAgent.last_init["model"] == "gpt5.6-sol"
+    assert runner._agent_cache[session_key] is warm
+    assert len(released) == 1 and isinstance(released[0], _CapturingAgent)
+
+
 def test_message_alias_with_provider_routes_through_that_provider(monkeypatch):
     """An alias for another provider's model gets that provider's full route, like channel_overrides."""
     monkeypatch.setattr(

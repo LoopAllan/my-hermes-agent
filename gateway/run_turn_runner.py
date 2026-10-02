@@ -79,6 +79,7 @@ class TurnRunner:
         self._runner = runner
         self._ctx = ctx
         self._message_model_alias_applied = False
+        self._one_turn_alias_agent = None
 
     # ── shared thread→loop plumbing ─────────────────────────────────────────────────────────
 
@@ -1134,6 +1135,13 @@ class TurnRunner:
         ctx = self._ctx
         runner = self._runner
         skip_context_files = self._skip_context_files(platform_key)
+        if self._message_model_alias_applied:
+            # A one-turn alias runs on its own agent: it must not displace (or be cached over) the
+            # session's warm agent and its prompt-cache prefix. Released when the turn finishes.
+            self._one_turn_alias_agent = self._build_fresh_agent(
+                turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr, skip_context_files,
+            )
+            return self._one_turn_alias_agent, False
         sig = runner._agent_config_signature(
             turn_route["model"], turn_route["runtime"], ctx.enabled_toolsets, combined_ephemeral,
             cache_keys=runner._extract_cache_busting_config(ctx.user_config),
@@ -1975,6 +1983,8 @@ class TurnRunner:
             "context_length": (getattr(comp, "context_length", 0) or 0) if has_comp else 0,
         }
         compacted_in_place, effective_session_id, history_offset = self._sync_session_after_run(agent_history)
+        if self._one_turn_alias_agent is not None:
+            self._release_evicted_agent(self._one_turn_alias_agent)
         # failure_reason must survive the empty-response path too (TUI billing, transient-failure
         # persistence). compression_deferred (soft lock-contention defer) is distinct from
         # compression_exhausted so the gateway never auto-resets a session a concurrent compressor is
