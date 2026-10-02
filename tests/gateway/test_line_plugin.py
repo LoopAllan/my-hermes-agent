@@ -321,6 +321,25 @@ def test_default_archive_stays_in_the_home_that_built_the_adapter(tmp_path, monk
     assert not (other_home / "logs").exists()
 
 
+@pytest.mark.parametrize(("is_self", "dispatched"), [(True, True), (False, False)])
+def test_self_mention_marker_gates_without_the_startup_bot_id(tmp_path, is_self, dispatched):
+    """A failed /v2/bot/info lookup must not silently drop every @mention for the adapter's lifetime."""
+    archive = tmp_path / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive)
+    adapter._bot_user_id = None
+    event = {
+        "type": "message",
+        "source": {"type": "group", "groupId": "Cok", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "@bot hi",
+                    "mention": {"mentionees": [{"index": 0, "length": 4, "type": "user", "isSelf": is_self}]}},
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    assert adapter._handle_message_event.await_count == int(dispatched)
+    assert len(_read_jsonl(archive)) == int(not dispatched)
+
+
 def test_unmentioned_room_sticker_is_archived_with_summary(tmp_path):
     archive = tmp_path / "unmentioned.jsonl"
     adapter = _archive_adapter(archive)

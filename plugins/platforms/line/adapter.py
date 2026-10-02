@@ -984,9 +984,13 @@ def interactive_setup() -> None:
 
 
 def _message_mentions_user(message: Dict[str, Any], user_id: Optional[str]) -> bool:
+    """True when the bot is @mentioned. LINE's ``isSelf`` marker needs no startup ``/v2/bot/info``
+    lookup, so a failed lookup cannot silently drop every group mention; ``userId`` is the fallback."""
     mentionees = ((message or {}).get("mention") or {}).get("mentionees") or []
-    return bool(user_id) and any(
-        isinstance(item, dict) and item.get("userId") == user_id for item in mentionees
+    return any(
+        isinstance(item, dict)
+        and (item.get("isSelf") is True or (bool(user_id) and item.get("userId") == user_id))
+        for item in mentionees
     )
 
 
