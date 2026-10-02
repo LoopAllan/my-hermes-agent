@@ -108,6 +108,23 @@ def _merge_phrase_config(catalog: dict[str, list[str]], section: Any, *, base_di
     _merge_phrase_mapping(catalog, section)
 
 
+def _merge_configured_phrase_catalog(catalog: dict[str, list[str]],
+                                     user_config: Mapping[str, Any] | None,
+                                     platform_key: str | None) -> None:
+    """Merge profile files and applicable display sections into ``catalog``."""
+    hermes_home = get_hermes_home()
+    _merge_phrase_paths(catalog, list(_CONVENTIONAL_RELATIVE_PATHS), base_dir=hermes_home)
+    display = (user_config or {}).get("display") if isinstance(user_config, Mapping) else None
+    if not isinstance(display, Mapping):
+        return
+    sections, platforms = [display], display.get("platforms")
+    if platform_key and isinstance(platforms, Mapping) and isinstance(platforms.get(platform_key), Mapping):
+        sections.append(platforms[platform_key])
+    for section in sections:
+        for key in _CONFIG_KEYS:
+            _merge_phrase_config(catalog, section.get(key), base_dir=hermes_home)
+
+
 def resolve_status_phrase_catalog(user_config: Mapping[str, Any] | None,
                                   platform_key: str | None = None) -> dict[str, list[str]]:
     """Resolve built-in + user-configured generic status phrases. Order mirrors gateway display
@@ -115,18 +132,20 @@ def resolve_status_phrase_catalog(user_config: Mapping[str, Any] | None,
     ``display.status_phrases`` (or legacy alias ``generic_status_phrases``), then
     ``display.platforms.<platform>.status_phrases``."""
     catalog = _copy_catalog(_DEFAULT_PHRASES)
-    hermes_home = get_hermes_home()
-    _merge_phrase_paths(catalog, list(_CONVENTIONAL_RELATIVE_PATHS), base_dir=hermes_home)
-    display = (user_config or {}).get("display") if isinstance(user_config, Mapping) else None
-    if not isinstance(display, Mapping):
-        return catalog
-    sections, platforms = [display], display.get("platforms")
-    if platform_key and isinstance(platforms, Mapping) and isinstance(platforms.get(platform_key), Mapping):
-        sections.append(platforms[platform_key])
-    for section in sections:
-        for key in _CONFIG_KEYS:
-            _merge_phrase_config(catalog, section.get(key), base_dir=hermes_home)
+    _merge_configured_phrase_catalog(catalog, user_config, platform_key)
     return catalog
+
+
+def has_configured_status_phrase_catalog(user_config: Mapping[str, Any] | None,
+                                         platform_key: str | None = None) -> bool:
+    """Whether this profile/platform supplies at least one usable ``status`` phrase.
+
+    Empty mappings, missing or invalid files, and generic-only catalogs do not
+    opt the long-running heartbeat into phrase mode.
+    """
+    configured: dict[str, list[str]] = {}
+    _merge_configured_phrase_catalog(configured, user_config, platform_key)
+    return bool(configured.get("status"))
 
 
 def classify_status_context(kind: str, *, tool_name: str | None = None, preview: str | None = None,

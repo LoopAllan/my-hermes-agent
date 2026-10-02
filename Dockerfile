@@ -363,6 +363,11 @@ RUN mkdir -p /opt/hermes/bin && \
     cp /opt/hermes/docker/hermes-exec-shim.sh /opt/hermes/bin/hermes && \
     chmod 0755 /opt/hermes /opt/hermes/bin/hermes && \
     printf 'docker\n' > /opt/hermes/.install_method
+RUN /opt/hermes/.venv/bin/python /opt/hermes/scripts/build_rule_artifacts.py \
+        --claude-output /etc/claude-code/CLAUDE.md && \
+    chown -R root:root /etc/claude-code && \
+    chmod 0555 /etc/claude-code && \
+    chmod 0444 /etc/claude-code/CLAUDE.md
 # The ``.install_method`` stamp is baked next to the running code (the install
 # tree), NOT into $HERMES_HOME. $HERMES_HOME (/opt/data) is a shared data
 # volume that is commonly bind-mounted from the host and even shared with a
@@ -423,7 +428,11 @@ RUN mkdir -p /etc/cont-init.d && \
     printf '#!/command/with-contenv sh\nexec /opt/hermes/docker/stage2-hook.sh\n' \
         > /etc/cont-init.d/01-hermes-setup && \
     chmod +x /etc/cont-init.d/01-hermes-setup
+COPY --chmod=0755 docker/marketplace-bootstrap.sh /opt/hermes/docker/marketplace-bootstrap.sh
+# Wrapped runtimes (entrypoint not PID 1) skip cont-init.d; entrypoint-dispatch runs this dir instead.
+COPY --chmod=0755 docker/marketplace-bootstrap.sh /opt/hermes/docker/direct-bootstrap.d/017-marketplace-bootstrap
 COPY --chmod=0755 docker/cont-init.d/015-supervise-perms /etc/cont-init.d/015-supervise-perms
+COPY --chmod=0755 docker/cont-init.d/017-marketplace-bootstrap /etc/cont-init.d/017-marketplace-bootstrap
 COPY --chmod=0755 docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-reconcile-profiles
 
 # ---------- Runtime ----------

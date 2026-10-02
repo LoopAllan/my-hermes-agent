@@ -1,7 +1,10 @@
 import random
 
+import pytest
+
 from gateway.status_phrases import (
     choose_status_phrase,
+    has_configured_status_phrase_catalog,
     resolve_status_phrase_catalog,
 )
 
@@ -36,8 +39,9 @@ def test_status_phrase_path_can_load_relative_directory(tmp_path, monkeypatch):
 
 
 def test_choose_status_phrase_uses_custom_catalog_without_leaking_args():
+    config = {"display": {"status_phrases": {"mode": "replace", "status": ["custom safe status text"]}}}
     catalog = resolve_status_phrase_catalog(
-        {"display": {"status_phrases": {"mode": "replace", "status": ["custom safe status text"]}}},
+        config,
         "whatsapp",
     )
 
@@ -49,3 +53,22 @@ def test_choose_status_phrase_uses_custom_catalog_without_leaking_args():
 
     assert msg == "custom safe status text"
     assert "SECRET" not in msg
+    assert has_configured_status_phrase_catalog(config, "whatsapp") is True
+
+
+@pytest.mark.parametrize(
+    "configured",
+    [
+        {},
+        {"path": "missing.yaml"},
+        {"path": "invalid.yaml"},
+        {"generic": ["custom generic text"]},
+    ],
+)
+def test_configured_status_catalog_requires_a_usable_status_phrase(tmp_path, monkeypatch, configured):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / "invalid.yaml").write_text("status: [", encoding="utf-8")
+
+    config = {"display": {"status_phrases": configured}}
+
+    assert has_configured_status_phrase_catalog(config, "whatsapp") is False

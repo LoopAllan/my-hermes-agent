@@ -80,6 +80,11 @@ class PlatformEntry:
     plugin_name: str = ""  # owning manifest so ``hermes gateway setup`` can auto-enable it
     allowed_users_env: str = ""  # comma-separated allowed user IDs (_is_user_authorized)
     allow_all_env: str = ""  # truthy "allow everyone" switch
+    allowed_group_chats_env: str = ""
+    allowed_room_chats_env: str = ""
+    chat_allowlist_authorization_config_key: str = ""
+    allowed_group_chats_config_key: str = ""
+    allowed_room_chats_config_key: str = ""
     max_message_length: int = 0  # smart-chunking cap; 0 = no limit
     pii_safe: bool = False  # session descriptions redact PII (phone numbers, etc.)
     emoji: str = "🔌"  # CLI/gateway display

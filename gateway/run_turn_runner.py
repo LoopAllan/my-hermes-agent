@@ -78,6 +78,8 @@ class TurnRunner:
     def __init__(self, runner: "GatewayRunner", ctx: TurnContext) -> None:
         self._runner = runner
         self._ctx = ctx
+        self._message_model_alias_applied = False
+        self._one_turn_alias_agent = None
 
     # ── shared thread→loop plumbing ─────────────────────────────────────────────────────────
 
@@ -1133,6 +1135,13 @@ class TurnRunner:
         ctx = self._ctx
         runner = self._runner
         skip_context_files = self._skip_context_files(platform_key)
+        if self._message_model_alias_applied:
+            # A one-turn alias runs on its own agent: it must not displace (or be cached over) the
+            # session's warm agent and its prompt-cache prefix. Released when the turn finishes.
+            self._one_turn_alias_agent = self._build_fresh_agent(
+                turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr, skip_context_files,
+            )
+            return self._one_turn_alias_agent, False
         sig = runner._agent_config_signature(
             turn_route["model"], turn_route["runtime"], ctx.enabled_toolsets, combined_ephemeral,
             cache_keys=runner._extract_cache_busting_config(ctx.user_config),
@@ -1829,7 +1838,8 @@ class TurnRunner:
                 ):
                     self._restore_telegram_thread_id_after_split(agent_session_id)
                 runner._sync_telegram_topic_binding(src, entry, reason="agent-run-compression")
-        runner._sync_session_model_from_agent(agent_session_id, agent)
+        if not self._message_model_alias_applied:
+            runner._sync_session_model_from_agent(agent_session_id, agent)
         # history_offset=0 whenever the agent's message list lost the original history prefix
         # (split OR in-place compaction): the returned `messages` is the compacted set, persist all
         # of it; slicing past the pre-compaction length would drop everything.
@@ -1882,6 +1892,27 @@ class TurnRunner:
         return final_response + "\n" + "\n".join(unique_tags)
 
     def run_sync(self):
+        try:
+            return self._run_sync()
+        finally:
+            if self._one_turn_alias_agent is not None:
+                self._retire_agents_after_alias_turn()
+
+    def _retire_agents_after_alias_turn(self) -> None:
+        """The one-turn alias agent is never cached; the session's cached agent never saw the aliased
+        exchange, so it is retired too and the next turn rebuilds its history from the transcript."""
+        ctx = self._ctx
+        cache_lock = getattr(self._runner, "_agent_cache_lock", None)
+        cache = getattr(self._runner, "_agent_cache", None)
+        stale = None
+        if cache_lock and cache is not None:
+            with cache_lock:
+                stale = cache.pop(ctx.session_key, None)
+        self._release_evicted_agent(self._one_turn_alias_agent)
+        if stale is not None:
+            self._release_evicted_agent(stale[0])
+
+    def _run_sync(self):
         """Executor-thread body of the turn; returns the gateway result dict.
 
         The turn message lives on the shared TurnContext (``ctx.message``) so ``_run_agent_inner`` sees
@@ -1906,7 +1937,9 @@ class TurnRunner:
         combined_ephemeral = self._combined_ephemeral_prompt()
         max_iterations = _current_max_iterations()
         try:
-            model, runtime_kwargs = runner._resolve_session_agent_runtime(
+            from gateway.message_model_aliases import resolve_turn_model_route, user_authored_text
+            model, runtime_kwargs, self._message_model_alias_applied = resolve_turn_model_route(
+                runner, user_authored_text(ctx.source, ctx.inbound_message_id, ctx.message),
                 source=ctx.source, session_key=ctx.session_key, user_config=ctx.user_config,
             )
             # Stashed by _resolve_session_agent_runtime when the primary's credentials failed and a

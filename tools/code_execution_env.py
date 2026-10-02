@@ -11,6 +11,7 @@ import platform
 import subprocess
 import sys
 from typing import Dict
+from tools.env_policy import AGENT_OWNED_ENV_VARS, resolve_agent_owned_env_value
 
 # Logger name kept as the origin module's so existing log expectations hold.
 logger = logging.getLogger("tools.code_execution_tool")
@@ -72,11 +73,21 @@ def _scrub_child_env(source_env, is_passthrough=None, is_windows=None):
     # Non-secret HERMES_* vars no allowlist admits are dropped on purpose; a script importing a
     # repo module that reads one would see it silently unset — log the drop, point at the opt-in.
     _dropped_hermes = []
+    source_env = dict(source_env)
+    for key in AGENT_OWNED_ENV_VARS:
+        value = resolve_agent_owned_env_value(key, source_env.get(key))
+        if value is None:
+            source_env.pop(key, None)
+        else:
+            source_env[key] = value
     for k, v in source_env.items():
         if is_passthrough(k):
             resolved = resolve_passthrough_value(k, v)
             if resolved is not None:
                 scrubbed[k] = resolved
+            continue
+        if k in AGENT_OWNED_ENV_VARS:
+            scrubbed[k] = v
             continue
         if any(s in k.upper() for s in _SECRET_SUBSTRINGS):
             continue

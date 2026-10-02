@@ -344,6 +344,28 @@ Details:
 - Resolution priority for the model is: session `/model` override → `channel_overrides` → global config. A user running `/model` in a chat still wins over the channel default.
 - The `system_prompt` override replaces the global gateway prompt for that channel (it is ephemeral — injected per turn, not stored in history).
 
+### Per-Message Model Aliases
+
+A message can pick the model for **that turn only** by naming an alias as a whole word (case-insensitive). Configure the aliases under `model.message_aliases` in `~/.hermes/config.yaml`:
+
+```yaml
+model:
+  default: anthropic/claude-opus-4.8
+  message_aliases:
+    Sol:
+      model: gpt-5.6-sol            # same provider as the current route
+    Luna:
+      model: moonshot/kimi-k3
+      provider: openrouter          # optional: route this turn through another provider
+```
+
+`Sol, review the deploy logs` runs on `gpt-5.6-sol`; the next message returns to the session's model. Notes:
+
+- Only what the user typed is matched — text added by slash-skill scaffolds or media enrichment never triggers an alias. `Sol` does not match inside `console`.
+- When several aliases appear, the first one listed in `message_aliases` wins.
+- With `provider`, the turn uses that provider's full route (credentials, endpoint, API mode), like `channel_overrides`; it still answers when the session's own provider is unavailable. Without `provider`, only the model changes on the current route.
+- An aliased turn never changes the session's `/model` override. Its exchange stays in the session transcript, and the next turn rebuilds the session's agent from that transcript.
+
 ## Security
 
 **By default, the gateway denies all users who are not in an allowlist or paired via DM.** This is the safe default for a bot with terminal access.

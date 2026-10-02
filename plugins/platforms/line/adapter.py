@@ -392,6 +392,10 @@ class LineAdapter(BasePlatformAdapter):
         self.allowed_users = allowlist("LINE_ALLOWED_USERS", "allowed_users")
         self.allowed_groups = allowlist("LINE_ALLOWED_GROUPS", "allowed_groups")
         self.allowed_rooms = allowlist("LINE_ALLOWED_ROOMS", "allowed_rooms")
+        self.require_mention = _truthy_env("LINE_REQUIRE_MENTION", bool(extra.get("require_mention", False)))
+        self.archive_unmentioned = _truthy_env("LINE_ARCHIVE_UNMENTIONED", bool(extra.get("archive_unmentioned", False)))
+        from plugins.platforms.line.archive import resolve_archive_path
+        self.archive_path = str(resolve_archive_path(_get_scoped_secret("LINE_ARCHIVE_PATH") or extra.get("archive_path")))
         # Slow-LLM postback button threshold + user-overridable copy
         threshold = env_or("LINE_SLOW_RESPONSE_THRESHOLD", "slow_response_threshold", DEFAULT_SLOW_RESPONSE_THRESHOLD)
         self.slow_response_threshold = _coerce(float, threshold, DEFAULT_SLOW_RESPONSE_THRESHOLD)
@@ -522,6 +526,11 @@ class LineAdapter(BasePlatformAdapter):
             logger.info("LINE: rejecting unauthorized source %s", source)
             return
         if event_type == "message":
+            if (self.require_mention and source.get("type") in {"group", "room"}
+                    and not _message_mentions_user(event.get("message") or {}, self._bot_user_id)):
+                if self.archive_unmentioned:
+                    self._archive_unmentioned(event, source)
+                return
             await self._handle_message_event(event)
         elif event_type == "postback":
             await self._handle_postback_event(event)
@@ -529,6 +538,22 @@ class LineAdapter(BasePlatformAdapter):
             logger.info("LINE: lifecycle event %s from %s", event_type, source)
         else:
             logger.debug("LINE: ignoring event type %r", event_type)
+
+    def _archive_unmentioned(self, event: Dict[str, Any], source: Dict[str, Any]) -> None:
+        """Archive only authorized messages; never download passive media."""
+        try:
+            from datetime import datetime
+            from plugins.platforms.line.archive import append_unmentioned_record
+            msg = event.get("message") or {}
+            chat_id, chat_type = _resolve_chat(source)
+            append_unmentioned_record({
+                "ts": datetime.now().astimezone().isoformat(), "platform": "line",
+                "chat_type": chat_type, "chat_id": chat_id,
+                "user_id": source.get("userId", ""), "message_id": msg.get("id", ""),
+                "msg_type": msg.get("type", ""), "text": _message_text_summary(msg),
+            }, path=self.archive_path)
+        except Exception as exc:
+            logger.warning("LINE: archive failed: %s", exc)
 
     async def _handle_message_event(self, event: Dict[str, Any]) -> None:
         msg = event.get("message") or {}
@@ -541,20 +566,13 @@ class LineAdapter(BasePlatformAdapter):
             self._reply_tokens[chat_id] = (reply_token, time.time() + LINE_REPLY_TOKEN_TTL_SECONDS)
         media_urls: List[str] = []
         media_types: List[str] = []
-        if msg_type == "text":
-            text = msg.get("text", "") or ""
-        elif msg_type in _INBOUND_MEDIA_EXT:  # fetch, cache, surface a vision-friendly local path
+        text = _message_text_summary(msg)
+        if msg_type in _INBOUND_MEDIA_EXT:  # fetch, cache, surface a vision-friendly local path
             local_path, media_type = await self._download_media(
                 message_id, msg_type, filename=msg.get("fileName") or msg.get("file_name"))
             if local_path:
                 media_urls, media_types = [local_path], [media_type]
-            text = f"[{msg_type}]"
-        elif msg_type == "sticker":
-            text = f"[sticker: {', '.join(msg['keywords'])}]" if msg.get("keywords") else "[sticker]"
-        elif msg_type == "location":
-            text = f"[location: {msg.get('title', '')} {msg.get('address', '')}]".strip()
-        else:
-            text = f"[unsupported message type: {msg_type}]"
+
         if chat_type == "dm" and self._client:  # best-effort typing indicator (DM only)
             asyncio.create_task(self._client.loading(chat_id))
         source_obj = self.build_source(
@@ -965,6 +983,30 @@ def interactive_setup() -> None:
     print_info("Done. Set the webhook URL in the LINE console to <your-public-url>/line/webhook and enable 'Use webhook'.")
 
 
+def _message_mentions_user(message: Dict[str, Any], user_id: Optional[str]) -> bool:
+    """True when the bot is @mentioned. LINE's ``isSelf`` marker needs no startup ``/v2/bot/info``
+    lookup, so a failed lookup cannot silently drop every group mention; ``userId`` is the fallback."""
+    mentionees = ((message or {}).get("mention") or {}).get("mentionees") or []
+    return any(
+        isinstance(item, dict)
+        and (item.get("isSelf") is True or (bool(user_id) and item.get("userId") == user_id))
+        for item in mentionees
+    )
+
+
+def _message_text_summary(msg: Dict[str, Any]) -> str:
+    msg_type = msg.get("type", "")
+    if msg_type == "text":
+        return msg.get("text", "") or ""
+    if msg_type in _INBOUND_MEDIA_EXT:
+        return f"[{msg_type}]"
+    if msg_type == "sticker":
+        return f"[sticker: {', '.join(msg['keywords'])}]" if msg.get("keywords") else "[sticker]"
+    if msg_type == "location":
+        return f"[location: {msg.get('title', '')} {msg.get('address', '')}]".strip()
+    return f"[unsupported message type: {msg_type}]"
+
+
 def register(ctx) -> None:
     ctx.register_platform(
         name="line", label="LINE", adapter_factory=lambda cfg: LineAdapter(cfg), check_fn=check_requirements,
@@ -973,6 +1015,9 @@ def register(ctx) -> None:
         setup_fn=interactive_setup, env_enablement_fn=_env_enablement, cron_deliver_env_var="LINE_HOME_CHANNEL",
         standalone_sender_fn=_standalone_send, allowed_users_env="LINE_ALLOWED_USERS",
         allow_all_env="LINE_ALLOW_ALL_USERS",
+        allowed_group_chats_env="LINE_ALLOWED_GROUPS", allowed_room_chats_env="LINE_ALLOWED_ROOMS",
+        allowed_group_chats_config_key="allowed_groups", allowed_room_chats_config_key="allowed_rooms",
+        chat_allowlist_authorization_config_key="authorize_allowed_chats",
         max_message_length=LINE_SAFE_BUBBLE_CHARS,  # per-bubble cap is 5000; smart-chunker uses 4500
         emoji="💚", pii_safe=False, allow_update_command=True,
         platform_hint=(

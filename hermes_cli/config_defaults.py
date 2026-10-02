@@ -983,13 +983,23 @@ DEFAULT_CONFIG = {
         "turn_isolation": False,
         "compute_host_heartbeat_secs": 15,
         "compute_host_respawn_max": 3,
-        # Token/cost analytics surfaces are hidden by default: the numbers are a local LOWER-BOUND
-        # estimate, not billing — only successful main-agent responses with a response.usage count;
-        # auxiliary calls, retries, fallbacks and cache writes are missed, so the total can be
-        # 10x-100x under the provider bill.
-        "show_token_analytics": False,
-        # IPs / bounded CIDRs of reverse proxies trusted to supply X-Forwarded-Proto/-For. Loopback
-        # always trusted; wildcards and /0 rejected (spoofing guard).
+        # Show the token/cost analytics surfaces (Analytics page, token bars and
+        # cost figures on the Models page) by default. The numbers shown there
+        # are a local debug estimate: they only count successful main-agent
+        # responses with a usable ``response.usage``, and silently exclude every
+        # auxiliary call (context compression, title generation, vision,
+        # session search, web extract, smart approval, MCP routing, plugin LLM
+        # access) plus provider-side retries, fallback attempts, and any call
+        # whose usage block didn't come back. Cache writes are also missing from
+        # the API response. On models with heavy auxiliary traffic (Kimi K2.6,
+        # MiniMax M2.7) the local total can be 10x-100x lower than the provider
+        # bill. It is a local lower-bound estimate, not a billing source; set
+        # this to False to hide these surfaces.
+        "show_token_analytics": True,
+        # IP addresses or bounded CIDR networks of reverse proxies allowed to
+        # supply X-Forwarded-Proto / X-Forwarded-For. Loopback remains trusted
+        # automatically. Wildcards and /0 networks are rejected so arbitrary
+        # clients cannot spoof their scheme or source address.
         "trusted_proxies": [],
         # WebSocket keepalive (seconds), NON-loopback binds only: loopback always disables the
         # protocol ping so an event-loop stall never kills a healthy local connection.
@@ -1424,6 +1434,23 @@ DEFAULT_CONFIG = {
     # and resolved; read-only — creation goes to ~/.hermes/skills/ unless create_dir redirects it.
     "skills": {
         "external_dirs": [],   # e.g. ["~/.agents/skills", "/shared/team-skills"]
+        # Optional trusted Git checkout of skills: cloned at container start, fast-forwarded and
+        # hot-reloaded in process; repo_dir/skills_path is discovered like an external_dirs entry.
+        "marketplace": {
+            "enabled": False,
+            "repository": "",
+            "repo_dir": "",
+            "skills_path": "plugins/skills",
+            "remote": "origin",
+            "branch": "main",
+            "interval_seconds": 300,
+        },
+        # Project-local skill discovery: when a session starts inside a git
+        # checkout, ``<root>/.hermes/skills/`` and ``<root>/.agents/skills/``
+        # are sourced as the highest-precedence skill tier — but ONLY when the
+        # project root is listed in trusted_project_dirs below. Trust a repo
+        # with ``hermes skills trust`` (run from inside it). Set to false to
+        # disable discovery entirely (no scan, no untrusted-skills notice).
         # Where skill_manage-created skills go (empty = profile-local dir). When set, new skills
         # land here AND agent-facing instructions name this path; expanded (~, ${VAR}), relative to
         # HERMES_HOME, scanned alongside the local dir.

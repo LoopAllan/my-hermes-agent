@@ -1094,32 +1094,32 @@ class GatewaySlashCommandsMixin(
             event=event, command="reload-mcp", title="/reload-mcp",
             message=t("gateway.reload_mcp.confirm_prompt"), handler=_on_confirm)
 
+    async def _reload_skills_runtime(self) -> dict:
+        """Rescan within the active profile without rebuilding running agents' prompts."""
+        from agent.skill_commands import reload_skills
+        from hermes_constants import get_hermes_home, profile_name_for_home
+        result = await self._run_in_executor_with_context(reload_skills)
+        profile = profile_name_for_home(get_hermes_home())
+        adapters = self._adapters_for_profile(profile)
+        for adapter in list(adapters.values()):
+            refresh = getattr(adapter, "refresh_skill_group", None)
+            try:
+                maybe = refresh() if callable(refresh) else None
+                if inspect.isawaitable(maybe):
+                    await maybe
+            except Exception as exc:
+                logger.warning("Adapter %s refresh_skill_group raised: %s", getattr(adapter, "name", adapter), exc)
+        return result
+
     async def _handle_reload_skills_command(self, event: MessageEvent) -> str:
         """Handle /reload-skills — rescan skills dir, queue a note for next turn. Skills are invoked at
         runtime, not baked into the system prompt, so this does NOT clear the prompt cache. The diff
         goes into ``_pending_skills_reload_notes[session_key]``, prepended to the NEXT user message —
         nothing out-of-band, so alternation is preserved."""
         try:
-            from agent.skill_commands import reload_skills
-
-            # _run_in_executor_with_context, not a bare hop: the rescan walks
-            # get_hermes_home()/skills, a contextvar override under multiplex.
-            result = await self._run_in_executor_with_context(reload_skills)
+            result = await self._reload_skills_runtime()
             added, removed = result.get("added", []), result.get("removed", [])  # [{"name", "description"}]
             total = result.get("total", 0)
-            # Let adapters refresh platform-side state that cached the skill list at startup (today:
-            # Discord /skill autocomplete — otherwise new skills stay invisible and deleted ones
-            # error). Adapters without refresh_skill_group are skipped; the in-process reload suffices.
-            for adapter in list(self.adapters.values()):
-                refresh = getattr(adapter, "refresh_skill_group", None)
-                try:
-                    maybe = refresh() if callable(refresh) else None
-                    if inspect.isawaitable(maybe):
-                        await maybe
-                except Exception as exc:
-                    logger.warning("Adapter %s refresh_skill_group raised: %s",
-                                   getattr(adapter, "name", adapter), exc)
-
             lines = [t("gateway.reload_skills.header")]
             if not added and not removed:
                 lines += [t("gateway.reload_skills.no_new"), t("gateway.reload_skills.total", count=total)]

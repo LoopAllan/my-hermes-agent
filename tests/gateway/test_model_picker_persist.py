@@ -31,6 +31,8 @@ from gateway.run import GatewayRunner
 from gateway.session import SessionSource
 
 
+
+
 class _FakePickerAdapter:
     """Minimal adapter that looks picker-capable and captures the callback.
 
@@ -407,3 +409,34 @@ async def test_global_switch_reports_failed_stale_override_cleanup(tmp_path, mon
     assert "store locked" in confirmation
     assert "Saved to config.yaml" not in confirmation
     assert runner._session_model_override(session_key)["model"] == "gpt-5.5"
+
+@pytest.mark.asyncio
+async def test_picker_tap_reports_session_only_when_global_config_is_read_only(
+    tmp_path, monkeypatch
+):
+    """A failed config write must not claim the selected model was saved.
+
+    Kubernetes commonly projects config.yaml from a read-only ConfigMap. The
+    picker still applies its per-session override, but its confirmation must
+    accurately describe that non-persistent result.
+    """
+    adapter = _FakePickerAdapter()
+    _setup_isolated_home(
+        tmp_path, monkeypatch, {"default": "old-model", "provider": "openai-codex"}
+    )
+    from unittest.mock import Mock
+    save = Mock(side_effect=OSError(30, "Read-only file system"))
+    monkeypatch.setattr("utils.atomic_roundtrip_yaml_update", save)
+    before = (tmp_path / ".hermes" / "config.yaml").read_bytes()
+    runner = _make_store_runner(adapter, tmp_path / "sessions", monkeypatch)
+    runner.session_store.get_or_create_session(_make_event("x").source)
+
+    confirmation = await _drive_picker(runner, _make_event("/model --global"))
+    save.assert_called_once()
+    assert (tmp_path / ".hermes" / "config.yaml").read_bytes() == before
+
+    assert confirmation is not None
+    assert "gpt-5.5" in confirmation
+    assert "session" in confirmation.lower()
+    assert "saved" not in confirmation.lower()
+    assert runner._session_model_overrides

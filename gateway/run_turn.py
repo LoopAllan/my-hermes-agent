@@ -2434,7 +2434,9 @@ class GatewayTurnMixin:
 
         try:
             user_config = _load_gateway_config()
-            model, runtime_kwargs = self._resolve_session_agent_runtime(source=source, user_config=user_config)
+            from gateway.message_model_aliases import resolve_turn_model_route
+            model, runtime_kwargs, _ = resolve_turn_model_route(
+                self, prompt, source=source, session_key=None, user_config=user_config)
             if not runtime_kwargs.get("api_key"):
                 await adapter.send(
                     source.chat_id,
@@ -2954,7 +2956,11 @@ class GatewayTurnMixin:
         )
         from agent.secret_scope import get_secret
         from gateway.display_config import resolve_display_setting, resolve_tool_progress
-        from gateway.status_phrases import choose_status_phrase, resolve_status_phrase_catalog
+        from gateway.status_phrases import (
+            choose_status_phrase,
+            has_configured_status_phrase_catalog,
+            resolve_status_phrase_catalog,
+        )
         user_config = _load_gateway_config()
         platform_key = _platform_config_key(source.platform)
         enabled_toolsets, disabled_toolsets = self._resolve_turn_toolsets(user_config, source, platform_key)
@@ -2979,6 +2985,7 @@ class GatewayTurnMixin:
         progress_grouping = resolve_display_setting(user_config, platform_key, "tool_progress_grouping") or "accumulate"
         _generic_status_recent: List[str] = []
         _generic_status_catalog = resolve_status_phrase_catalog(user_config, platform_key)
+        _custom_status_phrases_configured = has_configured_status_phrase_catalog(user_config, platform_key)
 
         def _display_surface_mode(
             setting: str, *, default: bool = False,
@@ -3058,6 +3065,7 @@ class GatewayTurnMixin:
             _thinking_enabled=_thinking_enabled, _native_slack_task_cards=_native_slack_task_cards,
             needs_progress_queue=tool_progress_enabled or _thinking_enabled or _native_slack_task_cards,
             _generic_status_phrase=_generic_status_phrase,
+            _custom_status_phrases_configured=_custom_status_phrases_configured,
         )
 
     # _RunAgentDisplay fields copied verbatim onto the TurnContext.
@@ -4189,12 +4197,12 @@ class GatewayTurnMixin:
             ):
                 break
             _elapsed_mins = int((time.time() - _notify_start) // 60)
-            # Terse heartbeat by default; the iteration counter is gated on busy_ack_detail.
+            # All internal activity is opt-in, including the tool/activity label.
             _status_detail = ""
-            _want_iteration_detail = bool(
-                disp.resolve_display_setting(disp.user_config, disp.platform_key, "busy_ack_detail", True)
+            _want_iteration_detail = (
+                disp.resolve_display_setting(disp.user_config, disp.platform_key, "busy_ack_detail", False) is True
             )
-            _a = self._agent_activity_summary(agent_holder[0])
+            _a = self._agent_activity_summary(agent_holder[0]) if _want_iteration_detail else None
             with suppress(Exception):
                 if _a:
                     _parts = []
@@ -4207,9 +4215,17 @@ class GatewayTurnMixin:
                         _status_detail = " — " + ", ".join(_parts)
             _heartbeat_text = (
                 disp._generic_status_phrase("status")
-                if _long_running_mode == "generic"
+                if (
+                    _long_running_mode == "generic"
+                    or getattr(disp, "_custom_status_phrases_configured", False)
+                )
                 else f"⏳ Working — {_elapsed_mins} min{_status_detail}"
             )
+            # Recheck ownership before editing, too.
+            if not self._should_emit_long_running_notification(
+                session_key, agent_holder[0], _executor_task_holder[0]
+            ):
+                break
             try:
                 _notify_res = None
                 if _heartbeat_msg_id:

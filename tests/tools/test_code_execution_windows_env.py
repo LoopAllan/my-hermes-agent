@@ -39,7 +39,7 @@ def test_native_essentials_and_passthrough_priority(windows, passthrough):
               "RANDOM_UNKNOWN_VAR": "unknown"}
     result = _scrub_child_env({**essentials, **safe, **secret}, is_windows=windows,
                              is_passthrough=lambda k: passthrough and k == "TENOR_API_KEY")
-    assert result == {**safe, **(essentials if windows else {}),
+    assert result == {**safe, "GITHUB_TOKEN": "fake-github", **(essentials if windows else {}),
                       **({"TENOR_API_KEY": "fake-third-party"} if passthrough else {})}
 
 

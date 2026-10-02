@@ -22,4 +22,11 @@ echo "[hermes] WARNING: container entrypoint is not PID 1; skipping s6-overlay /
 # /init normally seeds PATH with s6's helpers; the non-PID-1 fallback skips it.
 export PATH="/command:/package/admin/s6/command:${PATH}"
 /opt/hermes/docker/stage2-hook.sh
+# Derived images can add bootstrap work that normally runs as a later
+# cont-init.d hook. The wrapped-runtime path has no s6 init phase, so run the
+# same derived hooks explicitly before the unprivileged main process starts.
+for hook in /opt/hermes/docker/direct-bootstrap.d/*; do
+    [ -f "$hook" ] && [ -x "$hook" ] || continue
+    "$hook"
+done
 exec /opt/hermes/docker/main-wrapper.sh "$@"

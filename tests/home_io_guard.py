@@ -160,7 +160,7 @@ class HomeIOGuard:
         wrap(shutil, "rmtree", (("path", "dir_fd"),))
         wrap(sqlite3, "connect", (("database", None),))
 
-        original_open, original_close = os.open, os.close
+        original_open, original_close, original_dup = os.open, os.close, os.dup
 
         @wraps(original_open)
         def guarded_open(path, flags, *args, **kwargs):
@@ -179,5 +179,14 @@ class HomeIOGuard:
             self.directories.pop(fd, None)
             return original_close(fd)
 
+        @wraps(original_dup)
+        def guarded_dup(fd, *args, **kwargs):
+            duplicated = original_dup(fd, *args, **kwargs)
+            parent = self.directories.get(fd)
+            if parent is not None:
+                self.directories[duplicated] = parent
+            return duplicated
+
         monkeypatch.setattr(os, "open", guarded_open)
         monkeypatch.setattr(os, "close", guarded_close)
+        monkeypatch.setattr(os, "dup", guarded_dup)

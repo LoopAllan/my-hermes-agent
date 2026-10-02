@@ -26,7 +26,7 @@ from hermes_cli.update_channel import (  # noqa: E402
     _CANARY_TAG_RE, STABLE_TAG_RE, canary_tag_for_date, canary_timestamp,
     is_canary_tag,
 )
-from scripts.releases.authors import resolve_author  # noqa: E402
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -218,28 +218,6 @@ def clean_subject(subject: str) -> str:
     return cleaned
 
 
-def parse_coauthors(body: str) -> list:
-    """Extract Co-authored-by trailers from a commit message body.
-
-    Returns a list of {'name': ..., 'email': ...} dicts.
-    Filters out AI assistants and bots (Claude, Copilot, Cursor, etc.).
-    """
-    if not body:
-        return []
-    # AI/bot emails to ignore in co-author trailers
-    _ignored_emails = {"noreply@anthropic.com", "noreply@github.com",
-                       "cursoragent@cursor.com", "hermes@nousresearch.com"}
-    _ignored_names = re.compile(r"^(Claude|Copilot|Cursor Agent|GitHub Actions?|dependabot|renovate)", re.IGNORECASE)
-    pattern = re.compile(r"Co-authored-by:\s*(.+?)\s*<([^>]+)>", re.IGNORECASE)
-    results = []
-    for m in pattern.finditer(body):
-        name, email = m.group(1).strip(), m.group(2).strip()
-        if email in _ignored_emails or _ignored_names.match(name):
-            continue
-        results.append({"name": name, "email": email})
-    return results
-
-
 def get_commits(since_tag=None, until="HEAD", cwd=None):
     """Get commits in ``since_tag..until`` (or all of ``until`` if since_tag is None)."""
     if since_tag:
@@ -277,8 +255,6 @@ def get_commits(since_tag=None, until="HEAD", cwd=None):
         if len(parts) != 4:
             continue
         sha, name, email, subject = parts
-        coauthor_info = parse_coauthors(body)
-        coauthors = [resolve_author(ca["name"], ca["email"]) for ca in coauthor_info]
         commits.append({
             "sha": sha,
             "short_sha": sha[:8],
@@ -286,8 +262,6 @@ def get_commits(since_tag=None, until="HEAD", cwd=None):
             "author_email": email,
             "subject": subject,
             "category": categorize_commit(subject),
-            "github_author": resolve_author(name, email),
-            "coauthors": coauthors,
         })
 
     return commits
@@ -329,20 +303,12 @@ def generate_changelog(commits, tag_name, semver, repo_url="https://github.com/N
         lines.append("> for Hermes Agent. See below for everything included in this initial release.")
         lines.append("")
 
-    all_authors = set()
-    teknium_aliases = {"@teknium1"}
     if not no_changelog:
         # Group commits by category
         categories = defaultdict(list)
 
         for commit in commits:
             categories[commit["category"]].append(commit)
-            author = commit["github_author"]
-            if author not in teknium_aliases:
-                all_authors.add(author)
-            for coauthor in commit.get("coauthors", []):
-                if coauthor not in teknium_aliases:
-                    all_authors.add(coauthor)
 
         # Category display order and emoji
         category_order = [
@@ -367,7 +333,6 @@ def generate_changelog(commits, tag_name, semver, repo_url="https://github.com/N
             for commit in cat_commits:
                 subject = clean_subject(commit["subject"])
                 pr_num = get_pr_number(commit["subject"])
-                author = commit["github_author"]
 
                 # Build the line
                 parts = [f"- {subject}"]
@@ -376,35 +341,9 @@ def generate_changelog(commits, tag_name, semver, repo_url="https://github.com/N
                 else:
                     parts.append(f"([`{commit['short_sha']}`]({repo_url}/commit/{commit['sha']}))")
 
-                if author not in teknium_aliases:
-                    parts.append(f"— {author}")
-
                 lines.append(" ".join(parts))
 
             lines.append("")
-
-    # Contributors section
-    if all_authors:
-        # Sort contributors by commit count
-        author_counts = defaultdict(int)
-        for commit in commits:
-            author = commit["github_author"]
-            if author not in teknium_aliases:
-                author_counts[author] += 1
-            for coauthor in commit.get("coauthors", []):
-                if coauthor not in teknium_aliases:
-                    author_counts[coauthor] += 1
-
-        sorted_authors = sorted(author_counts.items(), key=lambda x: -x[1])
-
-        lines.append("## 👥 Contributors")
-        lines.append("")
-        lines.append("Thank you to everyone who contributed to this release!")
-        lines.append("")
-        for author, count in sorted_authors:
-            commit_word = "commit" if count == 1 else "commits"
-            lines.append(f"- {author} ({count} {commit_word})")
-        lines.append("")
 
     # Full changelog link
     if prev_tag:

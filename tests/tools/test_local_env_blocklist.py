@@ -14,6 +14,7 @@ from tests.tools._child_env_fixtures import child_env, observe_child, observe_te
 from tools.environments import local
 from tools.environments import local_pythonpath as pp
 from tools.environments.local_env_policy import _HERMES_PROVIDER_ENV_BLOCKLIST
+from tools.env_policy import AGENT_OWNED_ENV_VARS
 
 
 def _running_venv_site_packages() -> Path:
@@ -55,7 +56,7 @@ GATEWAY_RELAY_SECRET GATEWAY_RELAY_DELIVERY_KEY GATEWAY_RELAY_SESSION_TOKEN
 OPERATOR_ALLOWED = """
 AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_DEFAULT_REGION
 AWS_REGION AWS_SHARED_CREDENTIALS_FILE AWS_CONFIG_FILE AWS_WEB_IDENTITY_TOKEN_FILE AWS_ROLE_ARN
-CLAUDE_CODE_OAUTH_TOKEN AUXILIARY_VISION_PROVIDER AUXILIARY_VISION_MODEL GATEWAY_RELAY_URL
+CLAUDE_CODE_OAUTH_TOKEN GITHUB_TOKEN AUXILIARY_VISION_PROVIDER AUXILIARY_VISION_MODEL GATEWAY_RELAY_URL
 GATEWAY_RELAY_PLATFORMS MY_APP_KEY MY_CUSTOM_VAR
 """.split()
 
@@ -1049,7 +1050,7 @@ class TestBlocklistCoverage:
         """
         from hermes_cli.auth import PROVIDER_REGISTRY
 
-        exempt = {"CLAUDE_CODE_OAUTH_TOKEN"}
+        exempt = {"CLAUDE_CODE_OAUTH_TOKEN"} | AGENT_OWNED_ENV_VARS
         for pconfig in PROVIDER_REGISTRY.values():
             for var in pconfig.api_key_env_vars:
                 if var in exempt:
@@ -1119,6 +1120,8 @@ class TestBlocklistCoverage:
         for name, metadata in OPTIONAL_ENV_VARS.items():
             category = metadata.get("category")
             if category in {"tool", "messaging"}:
+                if name in AGENT_OWNED_ENV_VARS:
+                    continue
                 assert name in _HERMES_PROVIDER_ENV_BLOCKLIST, (
                     f"Optional env var {name} (category={category}) missing from blocklist"
                 )

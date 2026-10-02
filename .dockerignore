@@ -62,6 +62,8 @@ htmlcov/
 
 # Documentation
 *.md
+# Canonical agent rules are runtime inputs and must ship in the image.
+!docker/rules/**/*.md
 !skills/**/*.md
 !optional-skills/**/*.md
 

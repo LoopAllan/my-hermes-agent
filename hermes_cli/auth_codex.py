@@ -625,6 +625,7 @@ def resolve_codex_runtime_credentials(
     except AuthError as exc:
         read_error = exc
         if not read_only and exc.relogin_required and exc.code in {
+            "codex_auth_missing",
             "codex_auth_missing_access_token", "codex_auth_missing_refresh_token",
             "codex_auth_invalid_shape"}:
             imported = _recover_codex_tokens_from_cli(

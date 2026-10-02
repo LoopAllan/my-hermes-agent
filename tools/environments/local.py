@@ -274,6 +274,13 @@ def _finalize_child_env(env: dict) -> dict:
     """Guards shared by every spawn surface: profile-home propagation, session-context
     bridging, Hermes-owned PYTHONPATH + venv-marker strip, MSYS defaults, delegate_task
     Kanban scrub. Returns the (possibly new) dict."""
+    from tools.env_policy import AGENT_OWNED_ENV_VARS, resolve_agent_owned_env_value
+    for key in AGENT_OWNED_ENV_VARS:
+        value = resolve_agent_owned_env_value(key, env.get(key))
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
     _apply_profile_home(env)
     _inject_session_context_env(env)
     _strip_hermes_owned_pythonpath_and_runtime_markers(env)

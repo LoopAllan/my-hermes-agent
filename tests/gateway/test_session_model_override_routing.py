@@ -16,6 +16,7 @@ import pytest
 
 import gateway.run as gateway_run
 from gateway.config import Platform
+from gateway.platforms.event import MessageEvent
 from gateway.session import SessionSource
 
 
@@ -28,7 +29,7 @@ class _CapturingAgent:
         type(self).last_init = dict(kwargs)
         self.tools = []
 
-    def run_conversation(self, user_message: str, conversation_history=None, task_id=None):
+    def run_conversation(self, user_message: str, conversation_history=None, task_id=None, **_turn_kwargs):
         return {
             "final_response": "ok",
             "messages": [],
@@ -80,6 +81,345 @@ def _explode_runtime_resolution():
     raise AssertionError(
         "global runtime resolution should not run when a complete session override exists"
     )
+
+
+def test_run_agent_prefers_session_override_over_global_runtime(monkeypatch):
+    monkeypatch.setattr(gateway_run, "_load_gateway_config", lambda: {})
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+
+    _CapturingAgent.last_init = None
+    runner = _make_runner()
+
+    source = SessionSource(
+        platform=Platform.LOCAL,
+        chat_id="cli",
+        chat_name="CLI",
+        chat_type="dm",
+        user_id="user-1",
+    )
+    session_key = "agent:main:local:dm"
+    runner._session_model_overrides[session_key] = _codex_override()
+    runner._session_reasoning_overrides[session_key] = {"enabled": True, "effort": "high"}
+
+    result = asyncio.run(
+        runner._run_agent(
+            message="ping",
+            context_prompt="",
+            history=[],
+            source=source,
+            session_id="session-1",
+            session_key=session_key,
+        )
+    )
+
+    assert result["final_response"] == "ok"
+    assert _CapturingAgent.last_init is not None
+    assert _CapturingAgent.last_init["model"] == "gpt-5.4"
+    assert _CapturingAgent.last_init["provider"] == "openai-codex"
+    assert _CapturingAgent.last_init["api_mode"] == "codex_responses"
+    assert _CapturingAgent.last_init["base_url"] == "https://chatgpt.com/backend-api/codex"
+    assert _CapturingAgent.last_init["api_key"] == "***"
+    assert _CapturingAgent.last_init["reasoning_config"] == {"enabled": True, "effort": "high"}
+
+
+def test_run_agent_applies_message_alias_to_current_turn(monkeypatch):
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Sol": {"model": "gpt5.6-sol"}}}},
+    )
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+
+    _CapturingAgent.last_init = None
+    runner = _make_runner()
+    runner._sync_session_model_from_agent = MagicMock()
+    source = SessionSource(
+        platform=Platform.LOCAL,
+        chat_id="cli",
+        chat_name="CLI",
+        chat_type="dm",
+        user_id="user-1",
+    )
+    session_key = "agent:main:local:dm"
+    runner._session_model_overrides[session_key] = _codex_override()
+
+    result = asyncio.run(
+        runner._run_agent(
+            message="Sol, inspect the error logs.",
+            context_prompt="",
+            history=[],
+            source=source,
+            session_id="session-1",
+            session_key=session_key,
+        )
+    )
+
+    assert result["final_response"] == "ok"
+    assert _CapturingAgent.last_init["model"] == "gpt5.6-sol"
+    assert _CapturingAgent.last_init["provider"] == "openai-codex"
+    runner._sync_session_model_from_agent.assert_not_called()
+
+
+def test_aliased_turn_retires_the_sessions_stale_warm_agent(monkeypatch):
+    """The aliased exchange never reaches the cached agent's history, so that agent is retired (and
+    released) instead of serving the next turn a transcript that forgot it; the alias agent is never cached."""
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Sol": {"model": "gpt5.6-sol"}}}},
+    )
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+    runner = _make_runner()
+    runner._sync_session_model_from_agent = MagicMock()
+    released = []
+    monkeypatch.setattr(runner, "_release_evicted_agent_soft", released.append)
+    source = SessionSource(platform=Platform.LOCAL, chat_id="cli", chat_name="CLI", chat_type="dm", user_id="user-1")
+    session_key = "agent:main:local:dm"
+    runner._session_model_overrides[session_key] = _codex_override()
+    warm = (object(), "warm-signature", 0, "session-1")
+    runner._agent_cache[session_key] = warm
+
+    asyncio.run(runner._run_agent(
+        message="Sol, inspect the error logs.", context_prompt="", history=[], source=source,
+        session_id="session-1", session_key=session_key,
+    ))
+
+    assert _CapturingAgent.last_init["model"] == "gpt5.6-sol"
+    assert session_key not in runner._agent_cache
+    assert len(released) == 2
+    assert warm[0] in released and any(isinstance(agent, _CapturingAgent) for agent in released)
+
+
+def test_one_turn_alias_agent_is_released_when_the_turn_raises(monkeypatch):
+    """The uncached alias agent is released on every exit, not only after a clean turn."""
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Sol": {"model": "gpt5.6-sol"}}}},
+    )
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+
+    class _FailingAgent(_CapturingAgent):
+        def run_conversation(self, *args, **kwargs):
+            raise RuntimeError("provider exploded")
+
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _FailingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+    runner = _make_runner()
+    runner._sync_session_model_from_agent = MagicMock()
+    released = []
+    monkeypatch.setattr(runner, "_release_evicted_agent_soft", released.append)
+    source = SessionSource(platform=Platform.LOCAL, chat_id="cli", chat_name="CLI", chat_type="dm", user_id="user-1")
+    session_key = "agent:main:local:dm"
+    runner._session_model_overrides[session_key] = _codex_override()
+
+    try:
+        asyncio.run(runner._run_agent(
+            message="Sol, inspect the error logs.", context_prompt="", history=[], source=source,
+            session_id="session-1", session_key=session_key,
+        ))
+    except RuntimeError:
+        pass
+
+    assert len(released) == 1 and isinstance(released[0], _FailingAgent)
+
+
+def test_provider_alias_still_answers_when_the_base_route_is_unavailable(monkeypatch):
+    """Expired default credentials must not block an alias that names a working provider."""
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Luna": {"model": "moonshot/kimi-k3", "provider": "openrouter"}}}},
+    )
+
+    def expired_default_login():
+        raise RuntimeError("openai-codex login expired")
+
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", expired_default_login)
+    monkeypatch.setattr(
+        gateway_run, "_resolve_runtime_agent_kwargs_for_provider",
+        lambda provider, target_model=None: {
+            "provider": provider, "api_key": "or-key", "base_url": "https://openrouter.ai/api/v1",
+            "api_mode": "chat_completions", "credential_pool": None, "request_overrides": {}, "capabilities": {}},
+    )
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+    _CapturingAgent.last_init = None
+    runner = _make_runner()
+    runner._sync_session_model_from_agent = MagicMock()
+    source = SessionSource(platform=Platform.LOCAL, chat_id="cli", chat_name="CLI", chat_type="dm", user_id="user-1")
+
+    result = asyncio.run(runner._run_agent(
+        message="Luna, summarize this.", context_prompt="", history=[], source=source,
+        session_id="session-1", session_key="agent:main:local:dm",
+    ))
+
+    assert result["final_response"] == "ok"
+    assert _CapturingAgent.last_init["provider"] == "openrouter"
+    assert _CapturingAgent.last_init["model"] == "moonshot/kimi-k3"
+
+
+def test_message_alias_with_provider_routes_through_that_provider(monkeypatch):
+    """An alias for another provider's model gets that provider's full route, like channel_overrides."""
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Luna": {"model": "moonshot/kimi-k3", "provider": "openrouter"}}}},
+    )
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+    routed = []
+
+    def resolve_for_provider(provider, target_model=None):
+        routed.append((provider, target_model))
+        return {"provider": provider, "api_key": "or-key", "base_url": "https://openrouter.ai/api/v1",
+                "api_mode": "chat_completions", "credential_pool": None,
+                "request_overrides": {}, "capabilities": {}}
+
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs_for_provider", resolve_for_provider)
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+    _CapturingAgent.last_init = None
+    runner = _make_runner()
+    runner._sync_session_model_from_agent = MagicMock()
+    source = SessionSource(platform=Platform.LOCAL, chat_id="cli", chat_name="CLI", chat_type="dm", user_id="user-1")
+    session_key = "agent:main:local:dm"
+    runner._session_model_overrides[session_key] = _codex_override()
+
+    asyncio.run(runner._run_agent(
+        message="Luna, summarize this.", context_prompt="", history=[], source=source,
+        session_id="session-1", session_key=session_key,
+    ))
+
+    assert routed[-1] == ("openrouter", "moonshot/kimi-k3")
+    assert _CapturingAgent.last_init["model"] == "moonshot/kimi-k3"
+    assert _CapturingAgent.last_init["provider"] == "openrouter"
+    assert _CapturingAgent.last_init["base_url"] == "https://openrouter.ai/api/v1"
+    runner._sync_session_model_from_agent.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("authored", "expanded", "expected_model"),
+    [
+        ("/review the logs", "[skill scaffold: ask Sol for a second opinion]\n\nthe logs", "gpt-5.4"),
+        ("Sol, /review the logs", "[skill scaffold]\n\nthe logs", "gpt5.6-sol"),
+    ],
+)
+def test_message_alias_matches_only_user_authored_text(monkeypatch, authored, expanded, expected_model):
+    """Skill scaffolds and media enrichment are not the user's words; only what they typed picks a model."""
+    from gateway.message_model_aliases import remember_user_authored_text
+
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Sol": {"model": "gpt5.6-sol"}}}},
+    )
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+    _CapturingAgent.last_init = None
+    runner = _make_runner()
+    runner._sync_session_model_from_agent = MagicMock()
+    source = SessionSource(platform=Platform.LOCAL, chat_id="cli", chat_name="CLI", chat_type="dm", user_id="user-1")
+    session_key = "agent:main:local:dm"
+    runner._session_model_overrides[session_key] = _codex_override()
+    remember_user_authored_text(MessageEvent(text=authored, source=source, message_id="inbound-1"))
+
+    asyncio.run(runner._run_agent(
+        message=expanded, context_prompt="", history=[], source=source,
+        session_id="session-1", session_key=session_key, inbound_message_id="inbound-1",
+    ))
+
+    assert _CapturingAgent.last_init["model"] == expected_model
+
+
+@pytest.mark.asyncio
+async def test_background_task_prefers_session_override_over_global_runtime(monkeypatch):
+    monkeypatch.setattr(gateway_run, "_load_gateway_config", lambda: {})
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+
+    _CapturingAgent.last_init = None
+    runner = _make_runner()
+
+    adapter = AsyncMock()
+    adapter.send = AsyncMock()
+    adapter.extract_media = MagicMock(return_value=([], "ok"))
+    adapter.extract_images = MagicMock(return_value=([], "ok"))
+    runner.adapters[Platform.TELEGRAM] = adapter
+
+    source = SessionSource(
+        platform=Platform.TELEGRAM,
+        user_id="12345",
+        chat_id="67890",
+        user_name="testuser",
+    )
+    session_key = runner._session_key_for_source(source)
+    runner._session_model_overrides[session_key] = _codex_override()
+    runner._session_reasoning_overrides[session_key] = {"enabled": True, "effort": "high"}
+
+    await runner._run_background_task("say hello", source, "bg_test")
+
+    assert _CapturingAgent.last_init is not None
+    assert _CapturingAgent.last_init["model"] == "gpt-5.4"
+    assert _CapturingAgent.last_init["provider"] == "openai-codex"
+    assert _CapturingAgent.last_init["api_mode"] == "codex_responses"
+    assert _CapturingAgent.last_init["base_url"] == "https://chatgpt.com/backend-api/codex"
+    assert _CapturingAgent.last_init["api_key"] == "***"
+    assert _CapturingAgent.last_init["reasoning_config"] == {"enabled": True, "effort": "high"}
+
+
+@pytest.mark.asyncio
+async def test_background_task_applies_message_alias_to_current_turn(monkeypatch):
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Sol": {"model": "gpt5.6-sol"}}}},
+    )
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+
+    _CapturingAgent.last_init = None
+    runner = _make_runner()
+    adapter = AsyncMock()
+    adapter.send = AsyncMock()
+    adapter.extract_media = MagicMock(return_value=([], "ok"))
+    adapter.extract_images = MagicMock(return_value=([], "ok"))
+    runner.adapters[Platform.TELEGRAM] = adapter
+    source = SessionSource(
+        platform=Platform.TELEGRAM,
+        user_id="12345",
+        chat_id="67890",
+        user_name="testuser",
+    )
+    session_key = runner._session_key_for_source(source)
+    runner._session_model_overrides[session_key] = _codex_override()
+
+    await runner._run_background_task("Sol, inspect the error logs.", source, "bg_test")
+
+    assert _CapturingAgent.last_init is not None
+    assert _CapturingAgent.last_init["model"] == "gpt5.6-sol"
+    assert _CapturingAgent.last_init["provider"] == "openai-codex"
 
 
 def test_gateway_auth_fallback_uses_fallback_model_from_config(tmp_path, monkeypatch):

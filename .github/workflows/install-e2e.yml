@@ -46,6 +46,8 @@ name: Install & Update E2E
 #     A red scheduled run is reported by install-e2e-red.yml.
 
 on:
+  # Fork policy: workflows over five minutes do not run on PRs, pushes or schedules;
+  # dispatch it manually (or via workflow_call) when this coverage is needed.
   workflow_dispatch:
     inputs:
       route:
@@ -116,44 +118,6 @@ on:
         required: false
         type: string
         default: ''
-  schedule:
-    # Every 12 hours, off the hour to avoid the top-of-hour runner crunch.
-    - cron: '20 7,19 * * *'
-  pull_request:
-    # The install/update surface: derived from 60 days of commits whose subject
-    # names update/install/pm/bootstrap/relaunch. Keep it to code a real
-    # install or `hermes update` executes; hermes_cli/main.py and friends are
-    # deliberately absent (they change daily and are covered by e2e-upgrade).
-    paths:
-      - 'scripts/install*'
-      - 'scripts/desktop-update/**'
-      - 'setup-hermes.*'
-      - 'hermes_bootstrap.py'
-      - 'pm/**'
-      - 'hermes_cli/update*'
-      - 'hermes_cli/*update*'
-      - 'hermes_cli/pm*'
-      - 'hermes_cli/*install*'
-      - 'hermes_cli/_early_recovery.py'
-      - 'hermes_cli/_launchers.py'
-      - 'hermes_cli/managed_uv.py'
-      - 'hermes_cli/venv_sync.py'
-      - 'hermes_cli/relaunch.py'
-      - 'hermes_cli/gateway.py'
-      - 'gateway/status.py'
-      - 'apps/bootstrap-installer/**'
-      - 'apps/desktop/electron/*update*'
-      - 'apps/desktop/electron/updater/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tests/install/**'
-      - 'scripts/sandbox/generate-e2e-matrix.mjs'
-      - 'scripts/sandbox/pick-release-tags.sh'
-      - 'scripts/ci/setup_toolchain.py'
-      - '.github/actions/setup-pm/**'
-      - '.github/workflows/install-e2e*.yml'
 
 permissions:
   contents: read
@@ -180,6 +144,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           filter: blob:none
+          fetch-depth: 0
           fetch-tags: true
           sparse-checkout: |
             scripts/sandbox/pick-release-tags.sh
@@ -211,8 +176,15 @@ jobs:
             tags="$(jq -cn --arg ref "$INSTALL_REF" '[$ref]')"
           elif [ "$RELEASE_MODE" = true ]; then
             tags="$(python3 -m scripts.releases.pick_tags --count "$TAG_COUNT" --exclude-ref "$EXCLUDE_REF")"
-          else
+          elif git tag --list 'v*' | grep -Eq '^v[0-9]{4}\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
             tags="$(scripts/sandbox/pick-release-tags.sh --count "$TAG_COUNT")"
+          else
+            # A fork with no published release has no OLD version to upgrade
+            # from. Keep the PR path green rather than treating that absence
+            # as a selector failure; the PR matrix retains its PR-to-NEXT
+            # legs. Stable-release calls still require tags.
+            tags='[]'
+            echo 'No published release tags; omit OLD release baselines.'
           fi
           echo "Testing updates from: $tags"
           # Annotate each tag with what its own tree supports, so run

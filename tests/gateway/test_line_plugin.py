@@ -102,6 +102,330 @@ class TestAllowlist:
         src = {"type": "user", "userId": "Uok"}
         assert _allowed_for_source(src, allow_all=False, user_ids={"Uok"}, group_ids=set(), room_ids=set())
 
+    def test_user_not_in_allowlist_rejected(self):
+        src = {"type": "user", "userId": "Uother"}
+        assert not _allowed_for_source(src, allow_all=False, user_ids={"Uok"}, group_ids=set(), room_ids=set())
+
+    def test_group_requires_only_the_group_allowlist(self):
+        src = {"type": "group", "groupId": "Cok", "userId": "Uany"}
+        assert _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids={"Cok"}, room_ids=set())
+        assert not _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids=set(), room_ids=set())
+
+    def test_room_requires_only_the_room_allowlist(self):
+        src = {"type": "room", "roomId": "Rok", "userId": "Uany"}
+        assert _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids=set(), room_ids={"Rok"})
+        assert not _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids=set(), room_ids=set())
+
+    def test_unknown_type_rejected(self):
+        src = {"type": "weird"}
+        assert not _allowed_for_source(src, allow_all=False, user_ids=set(), group_ids=set(), room_ids=set())
+
+
+# ---------------------------------------------------------------------------
+# 3b. Group/room mention gate
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("source",),
+    [
+        ({"type": "group", "groupId": "Cok", "userId": "Uok"},),
+        ({"type": "room", "roomId": "Rok", "userId": "Uok"},),
+    ],
+)
+def test_group_and_room_messages_require_a_native_bot_mention(source):
+    from gateway.config import PlatformConfig
+
+    cfg = PlatformConfig(
+        enabled=True,
+        extra={
+            "channel_access_token": "tok",
+            "channel_secret": "sec",
+            "allowed_users": ["Uok"],
+            "allowed_groups": ["Cok"],
+            "allowed_rooms": ["Rok"],
+            "require_mention": True,
+        },
+    )
+    adapter = LineAdapter(cfg)
+    adapter._bot_user_id = "Ubot"
+    adapter._handle_message_event = AsyncMock()
+
+    event = {
+        "type": "message",
+        "source": source,
+        "message": {"type": "text", "id": "m1", "text": "ordinary message"},
+    }
+    asyncio.run(adapter._dispatch_event(event))
+
+    adapter._handle_message_event.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("source",),
+    [
+        ({"type": "group", "groupId": "Cok", "userId": "Uok"},),
+        ({"type": "room", "roomId": "Rok", "userId": "Uok"},),
+    ],
+)
+def test_group_and_room_messages_accept_a_native_bot_mention(source):
+    from gateway.config import PlatformConfig
+
+    cfg = PlatformConfig(
+        enabled=True,
+        extra={
+            "channel_access_token": "tok",
+            "channel_secret": "sec",
+            "allowed_users": ["Uok"],
+            "allowed_groups": ["Cok"],
+            "allowed_rooms": ["Rok"],
+            "require_mention": True,
+        },
+    )
+    adapter = LineAdapter(cfg)
+    adapter._bot_user_id = "Ubot"
+    adapter._handle_message_event = AsyncMock()
+
+    event = {
+        "type": "message",
+        "source": source,
+        "message": {
+            "type": "text",
+            "id": "m1",
+            "text": "@bot hello",
+            "mention": {"mentionees": [{"userId": "Ubot", "index": 0, "length": 4}]},
+        },
+    }
+    asyncio.run(adapter._dispatch_event(event))
+
+    adapter._handle_message_event.assert_awaited_once_with(event)
+
+
+def test_require_mention_does_not_gate_direct_messages():
+    from gateway.config import PlatformConfig
+
+    adapter = LineAdapter(
+        PlatformConfig(
+            enabled=True,
+            extra={
+                "channel_access_token": "tok",
+                "channel_secret": "sec",
+                "allowed_users": ["Uok"],
+                "require_mention": True,
+            },
+        )
+    )
+    adapter._bot_user_id = "Ubot"
+    adapter._handle_message_event = AsyncMock()
+    event = {
+        "type": "message",
+        "source": {"type": "user", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "ordinary direct message"},
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    adapter._handle_message_event.assert_awaited_once_with(event)
+
+
+# ---------------------------------------------------------------------------
+# Archive of unmentioned group/room messages
+# ---------------------------------------------------------------------------
+
+def _archive_adapter(archive_path, *, archive_unmentioned=True):
+    """Build a require_mention adapter wired to an explicit archive file."""
+    from gateway.config import PlatformConfig
+
+    cfg = PlatformConfig(
+        enabled=True,
+        extra={
+            "channel_access_token": "tok",
+            "channel_secret": "sec",
+            "allowed_users": ["Uok"],
+            "allowed_groups": ["Cok"],
+            "allowed_rooms": ["Rok"],
+            "require_mention": True,
+            "archive_unmentioned": archive_unmentioned,
+            "archive_path": str(archive_path),
+        },
+    )
+    adapter = LineAdapter(cfg)
+    adapter._bot_user_id = "Ubot"
+    adapter._handle_message_event = AsyncMock()
+    return adapter
+
+
+def _read_jsonl(path):
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def test_unmentioned_group_message_is_archived(tmp_path):
+    archive = tmp_path / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive)
+    event = {
+        "type": "message",
+        "source": {"type": "group", "groupId": "Cok", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "ordinary chatter"},
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    # Dropped from the agent path, but persisted.
+    adapter._handle_message_event.assert_not_awaited()
+    rows = _read_jsonl(archive)
+    assert len(rows) == 1
+    rec = rows[0]
+    assert rec["platform"] == "line"
+    assert rec["chat_type"] == "group"
+    assert rec["chat_id"] == "Cok"
+    assert rec["user_id"] == "Uok"
+    assert rec["message_id"] == "m1"
+    assert rec["msg_type"] == "text"
+    assert rec["text"] == "ordinary chatter"
+    assert "ts" in rec
+
+
+def test_default_archive_stays_in_the_home_that_built_the_adapter(tmp_path, monkeypatch):
+    """Webhooks run outside any profile scope; the archive must not follow whichever home is active then."""
+    from gateway.config import PlatformConfig
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+
+    owner_home, other_home = tmp_path / "owner", tmp_path / "other"
+    owner_home.mkdir()
+    other_home.mkdir()
+    monkeypatch.delenv("LINE_ARCHIVE_PATH", raising=False)
+    token = set_hermes_home_override(str(owner_home))
+    try:
+        adapter = LineAdapter(PlatformConfig(enabled=True, extra={
+            "channel_access_token": "tok", "channel_secret": "sec", "allowed_groups": ["Cok"],
+            "require_mention": True, "archive_unmentioned": True,
+        }))
+    finally:
+        reset_hermes_home_override(token)
+    adapter._bot_user_id = "Ubot"
+    adapter._handle_message_event = AsyncMock()
+    event = {
+        "type": "message",
+        "source": {"type": "group", "groupId": "Cok", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "chatter"},
+    }
+
+    token = set_hermes_home_override(str(other_home))
+    try:
+        asyncio.run(adapter._dispatch_event(event))
+    finally:
+        reset_hermes_home_override(token)
+
+    assert len(_read_jsonl(owner_home / "logs" / "line-unmentioned.jsonl")) == 1
+    assert not (other_home / "logs").exists()
+
+
+@pytest.mark.parametrize(("is_self", "dispatched"), [(True, True), (False, False)])
+def test_self_mention_marker_gates_without_the_startup_bot_id(tmp_path, is_self, dispatched):
+    """A failed /v2/bot/info lookup must not silently drop every @mention for the adapter's lifetime."""
+    archive = tmp_path / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive)
+    adapter._bot_user_id = None
+    event = {
+        "type": "message",
+        "source": {"type": "group", "groupId": "Cok", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "@bot hi",
+                    "mention": {"mentionees": [{"index": 0, "length": 4, "type": "user", "isSelf": is_self}]}},
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    assert adapter._handle_message_event.await_count == int(dispatched)
+    assert len(_read_jsonl(archive)) == int(not dispatched)
+
+
+def test_unmentioned_room_sticker_is_archived_with_summary(tmp_path):
+    archive = tmp_path / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive)
+    event = {
+        "type": "message",
+        "source": {"type": "room", "roomId": "Rok", "userId": "Uok"},
+        "message": {"type": "sticker", "id": "s1", "keywords": ["cony", "love"]},
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    adapter._handle_message_event.assert_not_awaited()
+    rows = _read_jsonl(archive)
+    assert len(rows) == 1
+    assert rows[0]["chat_type"] == "room"
+    assert rows[0]["text"] == "[sticker: cony, love]"
+
+
+def test_mentioned_group_message_is_not_archived(tmp_path):
+    archive = tmp_path / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive)
+    event = {
+        "type": "message",
+        "source": {"type": "group", "groupId": "Cok", "userId": "Uok"},
+        "message": {
+            "type": "text",
+            "id": "m1",
+            "text": "@bot hello",
+            "mention": {"mentionees": [{"userId": "Ubot", "index": 0, "length": 4}]},
+        },
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    # Reaches the agent, and is NOT archived.
+    adapter._handle_message_event.assert_awaited_once_with(event)
+    assert _read_jsonl(archive) == []
+
+
+def test_direct_message_is_not_archived(tmp_path):
+    archive = tmp_path / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive)
+    event = {
+        "type": "message",
+        "source": {"type": "user", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "hi bot"},
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    adapter._handle_message_event.assert_awaited_once_with(event)
+    assert _read_jsonl(archive) == []
+
+
+def test_archive_disabled_writes_nothing(tmp_path):
+    archive = tmp_path / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive, archive_unmentioned=False)
+    event = {
+        "type": "message",
+        "source": {"type": "group", "groupId": "Cok", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "ordinary chatter"},
+    }
+
+    asyncio.run(adapter._dispatch_event(event))
+
+    # Still gated out of the agent path, but nothing is written.
+    adapter._handle_message_event.assert_not_awaited()
+    assert _read_jsonl(archive) == []
+
+
+def test_archive_failure_never_breaks_dispatch(tmp_path):
+    # Point the archive at a path whose parent is a regular file -> mkdir fails.
+    blocker = tmp_path / "blocker"
+    blocker.write_text("x", encoding="utf-8")
+    archive = blocker / "unmentioned.jsonl"
+    adapter = _archive_adapter(archive)
+    event = {
+        "type": "message",
+        "source": {"type": "group", "groupId": "Cok", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "ordinary chatter"},
+    }
+
+    # Must not raise despite the unwritable archive path.
+    asyncio.run(adapter._dispatch_event(event))
+    adapter._handle_message_event.assert_not_awaited()
+
 
 # ---------------------------------------------------------------------------
 # 4. Inbound dedup
@@ -271,6 +595,29 @@ class TestRegister:
 
 
 
+    def test_register_wires_allowlist_envs(self):
+        ctx = self._FakeCtx()
+        register(ctx)
+        assert ctx.kwargs["allowed_users_env"] == "LINE_ALLOWED_USERS"
+        assert ctx.kwargs["allow_all_env"] == "LINE_ALLOW_ALL_USERS"
+        assert ctx.kwargs["allowed_group_chats_env"] == "LINE_ALLOWED_GROUPS"
+        assert ctx.kwargs["allowed_room_chats_env"] == "LINE_ALLOWED_ROOMS"
+        assert ctx.kwargs["chat_allowlist_authorization_config_key"] == "authorize_allowed_chats"
+
+    def test_register_wires_cron_home_channel(self):
+        ctx = self._FakeCtx()
+        register(ctx)
+        assert ctx.kwargs["cron_deliver_env_var"] == "LINE_HOME_CHANNEL"
+
+    def test_register_provides_standalone_sender(self):
+        ctx = self._FakeCtx()
+        register(ctx)
+        assert callable(ctx.kwargs["standalone_sender_fn"])
+
+    def test_register_provides_env_enablement(self):
+        ctx = self._FakeCtx()
+        register(ctx)
+        assert callable(ctx.kwargs["env_enablement_fn"])
 
 
     def test_max_message_length_below_line_per_bubble_limit(self):
@@ -418,6 +765,48 @@ class TestAdapterInit:
         assert ad.webhook_port == 7777
         assert ad.public_base_url == "https://x.example.com"
         assert ad.allowed_users == {"U1", "U2"}
+
+    def test_env_overrides_extra(self, monkeypatch):
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "env-tok")
+        monkeypatch.setenv("LINE_PORT", "1234")
+        from gateway.config import PlatformConfig
+        cfg = PlatformConfig(
+            enabled=True,
+            extra={"channel_access_token": "extra-tok", "channel_secret": "s", "port": 5555},
+        )
+        ad = LineAdapter(cfg)
+        assert ad.channel_access_token == "env-tok"
+        assert ad.webhook_port == 1234
+
+    def test_csv_allowlist_parsed(self, monkeypatch):
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "t")
+        monkeypatch.setenv("LINE_CHANNEL_SECRET", "s")
+        monkeypatch.setenv("LINE_ALLOWED_USERS", "U1, U2,U3")
+        monkeypatch.setenv("LINE_ALLOWED_GROUPS", "C1")
+        from gateway.config import PlatformConfig
+        ad = LineAdapter(PlatformConfig(enabled=True))
+        assert ad.allowed_users == {"U1", "U2", "U3"}
+        assert ad.allowed_groups == {"C1"}
+
+    def test_require_mention_uses_config_and_env_override(self, monkeypatch):
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "t")
+        monkeypatch.setenv("LINE_CHANNEL_SECRET", "s")
+        from gateway.config import PlatformConfig
+
+        cfg = PlatformConfig(enabled=True, extra={"require_mention": True})
+        assert LineAdapter(cfg).require_mention
+
+        monkeypatch.setenv("LINE_REQUIRE_MENTION", "false")
+        assert not LineAdapter(cfg).require_mention
+
+    def test_get_chat_info_infers_type_from_prefix(self, monkeypatch):
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "t")
+        monkeypatch.setenv("LINE_CHANNEL_SECRET", "s")
+        from gateway.config import PlatformConfig
+        ad = LineAdapter(PlatformConfig(enabled=True))
+        assert asyncio.run(ad.get_chat_info("U123"))["type"] == "dm"
+        assert asyncio.run(ad.get_chat_info("C123"))["type"] == "group"
+        assert asyncio.run(ad.get_chat_info("R123"))["type"] == "channel"
 
 
 # ---------------------------------------------------------------------------

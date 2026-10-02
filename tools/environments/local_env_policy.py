@@ -76,6 +76,8 @@ def _build_provider_env_blocklist() -> frozenset:
     # inference credential — Claude subscription auth is not a working Hermes provider path. It arrives via
     # the registry loop above (anthropic api_key_env_vars), so remove it explicitly. See #55878.
     blocked.discard("CLAUDE_CODE_OAUTH_TOKEN")
+    from tools.env_policy import AGENT_OWNED_ENV_VARS
+    blocked.difference_update(AGENT_OWNED_ENV_VARS)
     # BUZZ_* is deliberately NOT discarded here, even for Buzz-managed agents (BUZZ_MANAGED_AGENT set by the
     # buzz-acp harness). See #76243, #78026, #78065, #78511.
     return frozenset(blocked)
@@ -284,7 +286,7 @@ def _plugin_terminal_env_strip_keys() -> frozenset:
 # highest-value secrets to keep from a compromised dependency. Provider keys = Tier 2.
 _ALWAYS_STRIP_KEYS: frozenset[str] = frozenset({
     # GitHub auth
-    "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY_PATH",
+    "GH_TOKEN", "GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY_PATH",
     "GITHUB_APP_INSTALLATION_ID",
     # Gateway / messaging bot tokens and access control
     "TELEGRAM_BOT_TOKEN", "DISCORD_BOT_TOKEN", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN",

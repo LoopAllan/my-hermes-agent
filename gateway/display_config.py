@@ -23,7 +23,7 @@ _GLOBAL_DEFAULTS: dict[str, Any] = {
     "interim_assistant_messages": True,
     "suppress_warning_notifications": False,
     "long_running_notifications": True,
-    "busy_ack_detail": True,
+    "busy_ack_detail": False,
     "busy_steer_ack_enabled": True,  # busy_input_mode=steer echo; the text still lands in the run
     # Delete tool-progress / "⏳ Working" bubbles after a SUCCESSFUL final response where deletion is
     # supported (Telegram); failed runs keep them as breadcrumbs.
@@ -38,7 +38,7 @@ _GLOBAL_DEFAULTS: dict[str, Any] = {
 _TIER_HIGH = {
     "tool_progress": "all", "show_reasoning": False, "tool_preview_length": 40,
     "streaming": None,  # follow global
-    "interim_assistant_messages": True, "long_running_notifications": True, "busy_ack_detail": True,
+    "interim_assistant_messages": True, "long_running_notifications": True, "busy_ack_detail": False,
 }
 _TIER_MEDIUM = {**_TIER_HIGH, "tool_progress": "new"}
 _TIER_LOW = {

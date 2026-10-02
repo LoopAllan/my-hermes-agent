@@ -30,6 +30,8 @@ def test_selected_interpreter_environment_and_real_rpc(child_env, project_python
     witness.write_text("RPC → 雪\n", encoding="utf-8")
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join(map(str, [repo, site, repo, user_lib, user_lib])))
     monkeypatch.setenv("OPENAI_API_KEY", "fake-provider-secret")
+    monkeypatch.setenv("GITHUB_TOKEN", "agent-owned-token")
+    monkeypatch.setenv("GH_TOKEN", "other-identity")
     before = dict(os.environ)
     result = run_code(f'''
 import importlib.util, json, os, sys
@@ -43,6 +45,7 @@ print(json.dumps({{
     "encoding": [os.environ.get("PYTHONIOENCODING"), os.environ.get("PYTHONUTF8")],
     "essentials": {{k: os.environ.get(k) for k in ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT")}},
     "secret": os.environ.get("OPENAI_API_KEY"),
+    "github": os.environ.get("GITHUB_TOKEN"), "gh": os.environ.get("GH_TOKEN"),
     "project": (__import__("project_only_probe").VALUE
                 if importlib.util.find_spec("project_only_probe") else None),
     "user": user_probe.VALUE, "rpc": read_file({str(witness)!r}),
@@ -52,6 +55,8 @@ print(json.dumps({{
     if os.name == "nt":
         assert result["essentials"] == {k: before.get(k) for k in result["essentials"]}
     assert result["secret"] is None
+    assert result["github"] == "agent-owned-token"
+    assert result["gh"] is None
     assert result["user"] == "user → 雪"
     assert "RPC → 雪" in result["rpc"]["content"]
     assert result["rpc"]["total_lines"] == 1
@@ -77,12 +82,12 @@ print(json.dumps({{
 def test_credential_policy_and_whitelist_in_real_child(child_env, monkeypatch, mode):
     from tools.env_passthrough import register_env_passthrough
     blocked = (
-        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GITHUB_TOKEN", "MY_SECRET",
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GH_TOKEN", "MY_SECRET",
         "DB_PASSWORD", "VAULT_CREDENTIAL", "LDAP_PASSWD", "AUTH_TOKEN",
         "SENTRY_DSN", "SLACK_WEBHOOK", "HOME_APIKEY", "USER_CREDS", "TERM_BEARER",
         "HERMES_BASE_URL", "HERMES_INTERACTIVE", "BUZZ_PRIVATE_KEY", "RANDOM_UNKNOWN",
     )
-    allowed = ("HERMES_PROFILE", "HERMES_CONFIG", "HERMES_ENV", "LC_ENV_TEST", "TENOR_API_KEY")
+    allowed = ("HERMES_PROFILE", "HERMES_CONFIG", "HERMES_ENV", "LC_ENV_TEST", "TENOR_API_KEY", "GITHUB_TOKEN")
     for name in blocked + allowed:
         monkeypatch.setenv(name, "fake-" + name)
     # Registration is real: a skill cannot tunnel a provider or Buzz credential.

@@ -1,0 +1,338 @@
+"""Initial marketplace clone and root identity installation orchestration."""
+from __future__ import annotations
+
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+
+from gateway.marketplace_config import (
+    MarketplaceConfig,
+    MarketplaceConfigError,
+    load_marketplace_config_file,
+    marketplace_lock,
+)
+from gateway.marketplace_credentials import GitAuthEnvironment, marketplace_git_env
+
+_MAX_SOUL_BYTES = 20_000
+# getattr keeps the module importable on hosts without these flags; bootstrap_supported() gates use.
+_DIRECTORY_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+
+
+def bootstrap_supported() -> bool:
+    """The bootstrap anchors every path at /proc/self/fd, which only Linux (the container) has."""
+    from hermes_platform.host.facts import os_family
+
+    return os_family().startswith("linux")
+
+
+@dataclass(frozen=True)
+class MarketplaceBootstrap:
+    """Clone one validated marketplace and atomically install its root SOUL."""
+
+    hermes_home: Path
+    config: MarketplaceConfig
+
+    def run(self) -> None:
+        """Bootstrap through directory file descriptors, never mutable path parents."""
+        home_path = Path(os.path.abspath(self.hermes_home))
+        repository_path = Path(os.path.abspath(self.config.repo_dir))
+        try:
+            relative_repository = repository_path.relative_to(home_path)
+        except ValueError as exc:
+            raise RuntimeError(
+                "marketplace repository directory must resolve below HERMES_HOME"
+            ) from exc
+        if not relative_repository.parts or any(
+            component in {"", ".", ".."} for component in relative_repository.parts
+        ):
+            raise RuntimeError("marketplace repository directory must resolve below HERMES_HOME")
+
+        with marketplace_lock(home_path):
+            self._run_locked(home_path, relative_repository, repository_path)
+
+    def _run_locked(self, home_path: Path, relative_repository: Path, repository_path: Path) -> None:
+        home_fd = self._open_directory(home_path)
+        try:
+            parent_fd = self._open_parent(home_fd, relative_repository.parts[:-1])
+            try:
+                final_name = relative_repository.name
+                self._require_replaceable_repository(parent_fd, final_name)
+                local_state = self._local_state(parent_fd, final_name)
+                if local_state:
+                    # Same rule as the updater: never destroy what a fresh clone cannot recreate.
+                    print(
+                        f"marketplace bootstrap: warning: keeping {repository_path}; {local_state}",
+                        file=sys.stderr,
+                    )
+                    return
+                temporary_name = tempfile.mkdtemp(
+                    prefix=".marketplace-clone-", dir=self._fd_path(parent_fd)
+                )
+                try:
+                    clone_dir = Path(self._fd_path(parent_fd)) / temporary_name
+                    self._clone(clone_dir, parent_fd)
+                    self._validate_clone(clone_dir)
+                    soul_target = Path(self._fd_path(home_fd)) / "SOUL.md"
+                    # SOUL.md and the checkout commit together: stage the identity, swap the
+                    # checkout, then publish the identity; a failed swap commits neither.
+                    staged_soul = self._stage_soul(clone_dir / "SOUL.md", soul_target)
+                    # The clone took a while: re-check, so work done meanwhile is never retired.
+                    local_state = self._local_state(parent_fd, final_name)
+                    if local_state:
+                        staged_soul.unlink(missing_ok=True)
+                        print(
+                            f"marketplace bootstrap: warning: keeping {repository_path}; {local_state}",
+                            file=sys.stderr,
+                        )
+                        return
+                    try:
+                        retired = self._swap_in_clone(parent_fd, temporary_name, final_name)
+                        temporary_name = ""
+                        try:
+                            os.replace(staged_soul, soul_target)
+                        except BaseException:
+                            self._roll_back_swap(parent_fd, final_name, retired)
+                            raise
+                    finally:
+                        staged_soul.unlink(missing_ok=True)
+                    self._discard_retired(parent_fd, retired)
+                finally:
+                    if temporary_name:
+                        shutil.rmtree(temporary_name, dir_fd=parent_fd)
+            finally:
+                os.close(parent_fd)
+        finally:
+            os.close(home_fd)
+
+    @staticmethod
+    def _fd_path(descriptor: int) -> str:
+        """Return a child-process-visible path anchored at an inherited directory fd."""
+        return f"/proc/self/fd/{descriptor}"
+
+    @staticmethod
+    def _open_directory(path: Path) -> int:
+        try:
+            return os.open(path, _DIRECTORY_FLAGS)
+        except OSError as exc:
+            raise RuntimeError("HERMES_HOME must be an existing non-symlink directory") from exc
+
+    @classmethod
+    def _open_parent(cls, home_fd: int, components: tuple[str, ...]) -> int:
+        descriptor = os.dup(home_fd)
+        try:
+            for component in components:
+                next_descriptor = os.open(component, _DIRECTORY_FLAGS, dir_fd=descriptor)
+                os.close(descriptor)
+                descriptor = next_descriptor
+        except OSError as exc:
+            os.close(descriptor)
+            raise RuntimeError("marketplace repository parent does not exist or is a symlink") from exc
+        return descriptor
+
+    @staticmethod
+    def _require_replaceable_repository(parent_fd: int, final_name: str) -> None:
+        try:
+            metadata = os.stat(final_name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise RuntimeError("marketplace repository directory must be a real directory")
+
+    @classmethod
+    def _local_state(cls, parent_fd: int, final_name: str) -> str:
+        """Why the existing ``final_name`` must be kept ("" when replacing it loses nothing).
+
+        Missing or empty directories are replaceable. A non-checkout directory with files, or a
+        checkout with uncommitted changes or commits on no remote branch, holds state a fresh
+        clone cannot recreate.
+        """
+        checkout = Path(cls._fd_path(parent_fd)) / final_name
+        try:
+            descriptor = os.open(final_name, _DIRECTORY_FLAGS, dir_fd=parent_fd)
+        except FileNotFoundError:
+            return ""
+        try:
+            entries = os.listdir(descriptor)
+        finally:
+            os.close(descriptor)
+        if not entries:
+            return ""
+        if ".git" not in entries:
+            return "it is not a Git checkout and is not empty"
+        if cls._git_output(parent_fd, checkout, "status", "--porcelain"):
+            return "it has local changes"
+        if cls._git_output(parent_fd, checkout, "rev-list", "--max-count=1", "HEAD", "--not", "--remotes"):
+            return "it has commits that are on no remote branch"
+        return ""
+
+    @staticmethod
+    def _git_output(parent_fd: int, checkout: Path, *args: str) -> str:
+        # Git resolves /proc/self/fd in its own process, so it must inherit the parent fd. A
+        # failing command (corrupt checkout) counts as state to keep.
+        result = subprocess.run(
+            ["git", "-C", str(checkout), *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            env=marketplace_git_env(),
+            pass_fds=(parent_fd,),
+        )
+        if result.returncode != 0:
+            return result.stderr.strip() or f"git {args[0]} failed"
+        return result.stdout.strip()
+
+    @staticmethod
+    def _swap_in_clone(parent_fd: int, temporary_name: str, final_name: str) -> str:
+        """Replace the served checkout only after the new clone validated; a failed clone keeps it.
+
+        Returns the retired checkout's name ("" when there was none) for the caller to discard once
+        the matching SOUL.md is published."""
+        retired = f".marketplace-retired-{os.getpid()}-{final_name}"
+        try:
+            # rename(2) moves a raced final symlink itself, never its target.
+            os.rename(final_name, retired, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        except FileNotFoundError:
+            retired = ""
+        try:
+            os.replace(temporary_name, final_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        except BaseException:
+            if retired:
+                # Put the served checkout back; the caller removes the unused clone.
+                os.rename(retired, final_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+            raise
+        return retired
+
+    @classmethod
+    def _roll_back_swap(cls, parent_fd: int, final_name: str, retired: str) -> None:
+        """SOUL.md could not be published: put the previous checkout back (or none, on a first
+        install, so the watcher retries the bootstrap) and drop the new clone."""
+        failed = f".marketplace-failed-{os.getpid()}-{final_name}"
+        os.rename(final_name, failed, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        if retired:
+            os.rename(retired, final_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        cls._discard_retired(parent_fd, failed)
+
+    @staticmethod
+    def _discard_retired(parent_fd: int, retired: str) -> None:
+        """Best-effort: the new revision is already live, so a leftover tree only wastes space."""
+        if not retired:
+            return
+        try:
+            if stat.S_ISLNK(os.stat(retired, dir_fd=parent_fd, follow_symlinks=False).st_mode):
+                os.unlink(retired, dir_fd=parent_fd)
+            else:
+                shutil.rmtree(retired, dir_fd=parent_fd)
+        except OSError as exc:
+            print(f"marketplace bootstrap: warning: cannot remove {retired}: {exc}", file=sys.stderr)
+
+    def _clone(self, clone_dir: Path, parent_fd: int) -> None:
+        # /proc/self/fd is resolved by Git's process, so explicitly inherit the
+        # parent descriptor. The path remains tied to the opened directory even
+        # if an attacker renames its pathname and substitutes a symlink.
+        os.set_inheritable(parent_fd, True)
+        try:
+            with GitAuthEnvironment.from_vault() as git_env:
+                subprocess.run(
+                    [
+                        "git",
+                        "clone",
+                        "--depth",
+                        "1",
+                        "--single-branch",
+                        "--no-tags",
+                        "--branch",
+                        self.config.branch,
+                        # The updater fetches through this remote name.
+                        "--origin",
+                        self.config.remote,
+                        "--",
+                        self.config.repository,
+                        str(clone_dir),
+                    ],
+                    check=True,
+                    env=git_env,
+                    pass_fds=(parent_fd,),
+                )
+        finally:
+            os.set_inheritable(parent_fd, False)
+
+    def _validate_clone(self, clone_dir: Path) -> None:
+        resolved_clone = clone_dir.resolve(strict=True)
+        skills_dir = (resolved_clone / self.config.skills_path).resolve(strict=True)
+        if resolved_clone not in skills_dir.parents or not skills_dir.is_dir():
+            raise RuntimeError("configured skills directory is missing")
+
+    @staticmethod
+    def _stage_soul(source: Path, target: Path) -> Path:
+        """Validate the clone's SOUL.md and write it, fsynced, beside ``target``; return that path."""
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(source, flags)
+        except OSError as exc:
+            raise RuntimeError(
+                "root SOUL.md must be a regular non-symlink file"
+            ) from exc
+
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise RuntimeError(
+                    "root SOUL.md must be a regular non-symlink file"
+                )
+            if metadata.st_size < 1 or metadata.st_size > _MAX_SOUL_BYTES:
+                raise RuntimeError(
+                    "root SOUL.md must be nonempty and at most 20000 bytes"
+                )
+            with os.fdopen(descriptor, "rb") as source_file:
+                descriptor = -1
+                content = source_file.read(_MAX_SOUL_BYTES + 1)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+        with tempfile.NamedTemporaryFile(
+            dir=target.parent, prefix=".SOUL.md.", delete=False
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            try:
+                os.fchmod(temporary.fileno(), 0o600)
+                temporary.write(content)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            except BaseException:
+                temporary_path.unlink(missing_ok=True)
+                raise
+        return temporary_path
+
+
+def main() -> int:
+    """Run bootstrap from the runtime environment, failing closed when enabled."""
+    home_value = os.environ.get("HERMES_HOME")
+    if not home_value:
+        print("marketplace bootstrap: missing required configuration: HERMES_HOME", file=sys.stderr)
+        return 1
+    home = Path(home_value)
+    try:
+        config = load_marketplace_config_file(home, require_bootstrap=True)
+        if config is None:
+            return 0
+        MarketplaceBootstrap(home, config).run()
+    except (
+        MarketplaceConfigError,
+        OSError,
+        RuntimeError,
+        subprocess.SubprocessError,
+    ) as exc:
+        print(f"marketplace bootstrap: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

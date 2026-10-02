@@ -23,8 +23,8 @@ from gateway.whatsapp_identity import (
     normalize_whatsapp_identifier as _normalize_whatsapp_identifier,
 )
 
-_GROUP_CHAT_TYPES = frozenset({"group", "forum", "channel"})
-_GROUP_FORUM_TYPES = frozenset({"group", "forum"})
+_GROUP_CHAT_TYPES = frozenset({"group", "room", "forum", "channel"})
+_GROUP_FORUM_TYPES = frozenset({"group", "room", "forum"})
 _TRUTHY = frozenset({"true", "1", "yes"})
 _BOT_LOOP_GUARD_INIT_LOCK = threading.Lock()
 logger = logging.getLogger(__name__)
@@ -551,6 +551,28 @@ class GatewayAuthorizationMixin:
                 adapter_group_allowed = self._adapter_extra_for_source(source).get("group_allowed_chats")
                 if adapter_group_allowed and _allows(_coerce_allow_set(adapter_group_allowed), source.chat_id):
                     return True
+        # Plugin chat grants are explicit, scoped to the delivered transport/profile,
+        # and distinguish groups from rooms. Config-only profiles need no env bridge.
+        if is_group and source.chat_id:
+            entry = _registry_entry(source.platform)
+            if entry and entry.chat_allowlist_authorization_config_key:
+                extra = self._adapter_extra_for_source(source)
+                if not extra:
+                    # Legacy adapters need not retain config. Never fall back to
+                    # the launch profile for a routed secondary transport.
+                    config = (getattr(self, "_profile_configs", {}).get(adapter_profile)
+                              if adapter_profile else getattr(self, "config", None))
+                    platform_config = getattr(config, "platforms", {}).get(source.platform)
+                    extra = getattr(platform_config, "extra", {}) or {}
+                if extra.get(entry.chat_allowlist_authorization_config_key) is True:
+                    room = source.chat_type == "room"
+                    env_key = entry.allowed_room_chats_env if room else entry.allowed_group_chats_env
+                    config_key = entry.allowed_room_chats_config_key if room else entry.allowed_group_chats_config_key
+                    allowed = _coerce_allow_set(extra.get(config_key))
+                    if env_key:
+                        allowed |= _coerce_allow_set(_auth_env(env_key))
+                    if _allows(allowed, source.chat_id):
+                        return True
         # Bots admitted by {PLATFORM}_ALLOW_BOTS (scoped env → the routed adapter's YAML ``allow_bots`` →
         # none) bypass the human allowlist (Slack Workflow Builder posts arrive with user=None). The YAML
         # rung is what a secondary profile has: its config is never bridged into the process env.

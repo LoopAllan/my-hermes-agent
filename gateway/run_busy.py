@@ -714,11 +714,11 @@ class GatewayBusySessionMixin:
 
         # Terse by default; iteration/tool detail opts in via display.platforms.<p>.busy_ack_detail.
         status_parts = []
-        busy_ack_detail_enabled = bool(
+        busy_ack_detail_enabled = (
             resolve_display_setting(
                 _load_gateway_config(), _platform_config_key(event.source.platform),
-                "busy_ack_detail", True,
-            )
+                "busy_ack_detail", False,
+            ) is True
         )
         if busy_ack_detail_enabled and running_agent and running_agent is not _AGENT_PENDING_SENTINEL:
             try:
