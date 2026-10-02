@@ -49,11 +49,11 @@ class MarketplaceBootstrap:
             try:
                 final_name = relative_repository.name
                 self._require_replaceable_repository(parent_fd, final_name)
-                if self._has_local_changes(parent_fd, final_name):
-                    # Same rule as the updater: never overwrite local work in the served checkout.
+                local_state = self._local_state(parent_fd, final_name)
+                if local_state:
+                    # Same rule as the updater: never destroy what a fresh clone cannot recreate.
                     print(
-                        f"marketplace bootstrap: warning: keeping {repository_path}; "
-                        "it has local changes",
+                        f"marketplace bootstrap: warning: keeping {repository_path}; {local_state}",
                         file=sys.stderr,
                     )
                     return
@@ -122,14 +122,38 @@ class MarketplaceBootstrap:
             raise RuntimeError("marketplace repository directory must be a real directory")
 
     @classmethod
-    def _has_local_changes(cls, parent_fd: int, final_name: str) -> bool:
-        """True for an existing Git checkout with uncommitted or untracked changes."""
+    def _local_state(cls, parent_fd: int, final_name: str) -> str:
+        """Why the existing ``final_name`` must be kept ("" when replacing it loses nothing).
+
+        Missing or empty directories are replaceable. A non-checkout directory with files, or a
+        checkout with uncommitted changes or commits on no remote branch, holds state a fresh
+        clone cannot recreate.
+        """
         checkout = Path(cls._fd_path(parent_fd)) / final_name
-        if not (checkout / ".git").exists():
-            return False
-        # Git resolves /proc/self/fd in its own process, so it must inherit the parent fd.
+        try:
+            descriptor = os.open(final_name, _DIRECTORY_FLAGS, dir_fd=parent_fd)
+        except FileNotFoundError:
+            return ""
+        try:
+            entries = os.listdir(descriptor)
+        finally:
+            os.close(descriptor)
+        if not entries:
+            return ""
+        if ".git" not in entries:
+            return "it is not a Git checkout and is not empty"
+        if cls._git_output(parent_fd, checkout, "status", "--porcelain"):
+            return "it has local changes"
+        if cls._git_output(parent_fd, checkout, "rev-list", "--max-count=1", "HEAD", "--not", "--remotes"):
+            return "it has commits that are on no remote branch"
+        return ""
+
+    @staticmethod
+    def _git_output(parent_fd: int, checkout: Path, *args: str) -> str:
+        # Git resolves /proc/self/fd in its own process, so it must inherit the parent fd. A
+        # failing command (corrupt checkout) counts as state to keep.
         result = subprocess.run(
-            ["git", "-C", str(checkout), "status", "--porcelain"],
+            ["git", "-C", str(checkout), *args],
             capture_output=True,
             text=True,
             timeout=30,
@@ -137,7 +161,9 @@ class MarketplaceBootstrap:
             env=marketplace_git_env(),
             pass_fds=(parent_fd,),
         )
-        return result.returncode == 0 and bool(result.stdout.strip())
+        if result.returncode != 0:
+            return result.stderr.strip() or f"git {args[0]} failed"
+        return result.stdout.strip()
 
     @staticmethod
     def _swap_in_clone(parent_fd: int, temporary_name: str, final_name: str) -> str:

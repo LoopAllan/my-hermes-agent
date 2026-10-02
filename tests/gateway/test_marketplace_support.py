@@ -135,12 +135,18 @@ def test_token_parser_accepts_bom_prefixed_vault_env_file(tmp_path: Path) -> Non
     assert read_marketplace_token(vault) == "bom-safe"
 
 
+def _treat_existing_checkout_as_replaceable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Swap-mechanics tests seed a plain directory; preservation has its own tests below."""
+    monkeypatch.setattr(marketplace_bootstrap.MarketplaceBootstrap, "_local_state", classmethod(lambda *a: ""))
+
+
 # The bootstrap anchors clone paths at /proc/self/fd, which only Linux (the container) provides.
 @pytest.mark.platforms("linux")
 def test_bootstrap_parent_symlink_swap_cannot_redirect_clone_or_deletion(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """An opened parent fd keeps cleanup and clone out of a later symlink target."""
+    _treat_existing_checkout_as_replaceable(monkeypatch)
     home = tmp_path / "home"
     parent = home / "marketplace"
     repository = parent / "repository"
@@ -309,6 +315,7 @@ def test_vault_file_comes_from_the_active_profile_scope(
 @pytest.mark.platforms("linux")
 def test_failed_clone_keeps_the_existing_checkout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A transient Git failure on restart must not delete the checkout that is still serving skills."""
+    _treat_existing_checkout_as_replaceable(monkeypatch)
     import subprocess
 
     home = tmp_path / "home"
@@ -343,6 +350,7 @@ def test_failed_checkout_swap_leaves_the_profile_soul_untouched(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """SOUL.md and the skills checkout change together: a failed swap commits neither."""
+    _treat_existing_checkout_as_replaceable(monkeypatch)
     home = tmp_path / "home"
     repository = home / "marketplace" / "repository"
     repository.mkdir(parents=True)
@@ -379,6 +387,7 @@ def test_failed_checkout_swap_leaves_the_profile_soul_untouched(
 @pytest.mark.platforms("linux")
 def test_failed_swap_restores_the_retired_checkout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """If installing the new clone fails after the old one was moved aside, the old one comes back."""
+    _treat_existing_checkout_as_replaceable(monkeypatch)
     home = tmp_path / "home"
     repository = home / "marketplace" / "repository"
     (repository / "plugins" / "skills").mkdir(parents=True)
@@ -442,6 +451,7 @@ def test_retired_checkout_cleanup_failure_still_publishes_a_consistent_revision(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Cleanup of the old tree is best-effort and runs after SOUL.md matches the new checkout."""
+    _treat_existing_checkout_as_replaceable(monkeypatch)
     home = tmp_path / "home"
     repository = home / "marketplace" / "repository"
     (repository / "plugins" / "skills").mkdir(parents=True)
@@ -479,6 +489,7 @@ def test_retired_checkout_cleanup_failure_still_publishes_a_consistent_revision(
 @pytest.mark.platforms("linux")
 def test_failed_soul_publish_rolls_the_checkout_back(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """If SOUL.md cannot be published, the previous checkout serves again beside the previous SOUL."""
+    _treat_existing_checkout_as_replaceable(monkeypatch)
     home = tmp_path / "home"
     repository = home / "marketplace" / "repository"
     (repository / "plugins" / "skills").mkdir(parents=True)
@@ -551,3 +562,56 @@ def test_bootstrap_keeps_a_dirty_checkout(
     assert (repository / "plugins" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "local edit"
     assert (home / "SOUL.md").read_text(encoding="utf-8") == "old soul"
     assert "local changes" in capsys.readouterr().err
+
+
+def _clone_with_local_commit(tmp_path: Path, repository: Path) -> None:
+    import subprocess
+
+    remote = tmp_path / "remote.git"
+    seed = tmp_path / "seed"
+    run = lambda *args, cwd=None: subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)  # noqa: E731
+    run("init", "-q", "--bare", str(remote))
+    run("init", "-q", "-b", "main", str(seed))
+    (seed / "plugins" / "skills").mkdir(parents=True)
+    (seed / "plugins" / "skills" / "SKILL.md").write_text("pushed", encoding="utf-8")
+    for args in (["config", "user.email", "t@t"], ["config", "user.name", "t"], ["add", "-A"],
+                 ["commit", "-qm", "seed"], ["push", "-q", str(remote), "main"]):
+        run(*args, cwd=seed)
+    run("clone", "-q", "-b", "main", str(remote), str(repository))
+    (repository / "plugins" / "skills" / "SKILL.md").write_text("unpushed", encoding="utf-8")
+    for args in (["config", "user.email", "t@t"], ["config", "user.name", "t"], ["commit", "-qam", "local"]):
+        run(*args, cwd=repository)
+
+
+@pytest.mark.platforms("linux")
+@pytest.mark.parametrize("state", ["unpushed-commit", "foreign-files"])
+def test_bootstrap_keeps_state_it_cannot_recreate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], state: str
+) -> None:
+    """A clean checkout with local-only commits, or a non-checkout directory with files, survives restarts."""
+    import subprocess
+
+    home = tmp_path / "home"
+    repository = home / "marketplace" / "repository"
+    if state == "unpushed-commit":
+        repository.parent.mkdir(parents=True)
+        _clone_with_local_commit(tmp_path, repository)
+        sentinel, expected = repository / "plugins" / "skills" / "SKILL.md", "unpushed"
+    else:
+        repository.mkdir(parents=True)
+        sentinel, expected = repository / "notes.txt", "operator data"
+        sentinel.write_text(expected, encoding="utf-8")
+    config = load_marketplace_config(_settings(repository), require_bootstrap=True)
+    assert config is not None
+    real_run = subprocess.run
+
+    def no_clone(args: list[str], **kwargs: object):
+        assert "clone" not in args, "existing state must not be replaced"
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(marketplace_bootstrap.subprocess, "run", no_clone)
+
+    marketplace_bootstrap.MarketplaceBootstrap(home, config).run()
+
+    assert sentinel.read_text(encoding="utf-8") == expected
+    assert "keeping" in capsys.readouterr().err
