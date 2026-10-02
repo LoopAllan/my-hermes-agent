@@ -2434,9 +2434,9 @@ class GatewayTurnMixin:
 
         try:
             user_config = _load_gateway_config()
-            model, runtime_kwargs = self._resolve_session_agent_runtime(source=source, user_config=user_config)
-            from gateway.message_model_aliases import apply_message_model_alias
-            model, runtime_kwargs = apply_message_model_alias(prompt, model, runtime_kwargs, user_config)
+            from gateway.message_model_aliases import resolve_turn_model_route
+            model, runtime_kwargs, _ = resolve_turn_model_route(
+                self, prompt, source=source, session_key=None, user_config=user_config)
             if not runtime_kwargs.get("api_key"):
                 await adapter.send(
                     source.chat_id,

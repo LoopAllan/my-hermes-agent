@@ -234,6 +234,42 @@ def test_one_turn_alias_agent_is_released_when_the_turn_raises(monkeypatch):
     assert len(released) == 1 and isinstance(released[0], _FailingAgent)
 
 
+def test_provider_alias_still_answers_when_the_base_route_is_unavailable(monkeypatch):
+    """Expired default credentials must not block an alias that names a working provider."""
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Luna": {"model": "moonshot/kimi-k3", "provider": "openrouter"}}}},
+    )
+
+    def expired_default_login():
+        raise RuntimeError("openai-codex login expired")
+
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", expired_default_login)
+    monkeypatch.setattr(
+        gateway_run, "_resolve_runtime_agent_kwargs_for_provider",
+        lambda provider, target_model=None: {
+            "provider": provider, "api_key": "or-key", "base_url": "https://openrouter.ai/api/v1",
+            "api_mode": "chat_completions", "credential_pool": None, "request_overrides": {}, "capabilities": {}},
+    )
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+    _CapturingAgent.last_init = None
+    runner = _make_runner()
+    runner._sync_session_model_from_agent = MagicMock()
+    source = SessionSource(platform=Platform.LOCAL, chat_id="cli", chat_name="CLI", chat_type="dm", user_id="user-1")
+
+    result = asyncio.run(runner._run_agent(
+        message="Luna, summarize this.", context_prompt="", history=[], source=source,
+        session_id="session-1", session_key="agent:main:local:dm",
+    ))
+
+    assert result["final_response"] == "ok"
+    assert _CapturingAgent.last_init["provider"] == "openrouter"
+    assert _CapturingAgent.last_init["model"] == "moonshot/kimi-k3"
+
+
 def test_message_alias_with_provider_routes_through_that_provider(monkeypatch):
     """An alias for another provider's model gets that provider's full route, like channel_overrides."""
     monkeypatch.setattr(

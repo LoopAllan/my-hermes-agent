@@ -54,6 +54,13 @@ def resolve_message_model_alias(
     return None
 
 
+def _provider_route(match: MessageModelAlias) -> tuple[str, dict]:
+    from gateway.run import _resolve_runtime_agent_kwargs_for_provider
+    routed = _resolve_runtime_agent_kwargs_for_provider(match.provider, target_model=match.model)
+    routed.pop("model", None)
+    return match.model, routed
+
+
 def apply_message_model_alias(
     user_message: Optional[str], model: str, runtime_kwargs: dict, config: Optional[dict],
 ) -> tuple[str, dict]:
@@ -67,14 +74,39 @@ def apply_message_model_alias(
         return model, runtime_kwargs
     if not match.provider:
         return match.model, runtime_kwargs
-    from gateway.run import _resolve_runtime_agent_kwargs_for_provider
     try:
-        routed = _resolve_runtime_agent_kwargs_for_provider(match.provider, target_model=match.model)
+        return _provider_route(match)
     except Exception as exc:
         logger.warning("Model alias %s provider %s unavailable: %s", match.alias, match.provider, exc)
         return model, runtime_kwargs
-    routed.pop("model", None)
-    return match.model, routed
+
+
+def resolve_turn_model_route(
+    runner: Any, user_message: Optional[str], *, source: Any, session_key: Optional[str],
+    user_config: Optional[dict],
+) -> tuple[str, dict, bool]:
+    """``(model, runtime_kwargs, alias_applied)`` for one turn: the session route plus any alias.
+
+    When the session route cannot resolve (e.g. expired default credentials), an alias naming its
+    own provider still answers; otherwise the original resolution error propagates unchanged.
+    """
+    try:
+        model, runtime_kwargs = runner._resolve_session_agent_runtime(
+            source=source, session_key=session_key, user_config=user_config,
+        )
+    except Exception:
+        match = resolve_message_model_alias(user_message, user_config)
+        if match is None or not match.provider:
+            raise
+        try:
+            routed_model, routed_runtime = _provider_route(match)
+        except Exception as alias_exc:
+            logger.warning("Model alias %s provider %s unavailable: %s", match.alias, match.provider, alias_exc)
+            raise
+        runner._pre_agent_fallback_notice = None
+        return routed_model, routed_runtime, True
+    resolved_model, resolved_runtime = apply_message_model_alias(user_message, model, runtime_kwargs, user_config)
+    return resolved_model, resolved_runtime, (resolved_model, resolved_runtime) != (model, runtime_kwargs)
 
 
 # What the user typed, keyed by conversation + inbound message id (platform ids repeat across chats),

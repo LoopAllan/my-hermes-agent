@@ -1924,15 +1924,11 @@ class TurnRunner:
         combined_ephemeral = self._combined_ephemeral_prompt()
         max_iterations = _current_max_iterations()
         try:
-            model, runtime_kwargs = runner._resolve_session_agent_runtime(
+            from gateway.message_model_aliases import resolve_turn_model_route, user_authored_text
+            model, runtime_kwargs, self._message_model_alias_applied = resolve_turn_model_route(
+                runner, user_authored_text(ctx.source, ctx.inbound_message_id, ctx.message),
                 source=ctx.source, session_key=ctx.session_key, user_config=ctx.user_config,
             )
-            from gateway.message_model_aliases import apply_message_model_alias, user_authored_text
-            resolved_model, resolved_runtime = apply_message_model_alias(
-                user_authored_text(ctx.source, ctx.inbound_message_id, ctx.message), model, runtime_kwargs,
-                ctx.user_config)
-            self._message_model_alias_applied = (resolved_model, resolved_runtime) != (model, runtime_kwargs)
-            model, runtime_kwargs = resolved_model, resolved_runtime
             # Stashed by _resolve_session_agent_runtime when the primary's credentials failed and a
             # fallback was resolved before any agent exists (#74349); one-shot per turn.
             pending_fallback_notice = getattr(runner, "_pre_agent_fallback_notice", None)
