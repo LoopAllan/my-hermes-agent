@@ -1,4 +1,4 @@
-"""Keep fork CI on hosted runners and limited to lanes under five minutes."""
+"""Keep fork CI on hosted runners and limited to lanes under five minutes (PR #40)."""
 from pathlib import Path
 import hermes_yaml as yaml
 

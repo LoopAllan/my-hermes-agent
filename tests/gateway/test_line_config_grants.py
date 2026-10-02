@@ -1,4 +1,4 @@
-"""PR #40: config-only LINE grants remain profile/chat scoped."""
+"""Config-only LINE grants remain profile/chat scoped (restored in PR #40)."""
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
