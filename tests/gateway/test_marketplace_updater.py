@@ -182,6 +182,45 @@ async def test_gateway_watcher_bootstraps_a_missing_checkout_in_the_profile_scop
     assert reloads == [str(served_home)]
 
 
+@pytest.mark.asyncio
+async def test_gateway_watcher_reloads_skills_when_the_marketplace_is_disabled(monkeypatch, tmp_path: Path):
+    """Turning skills.marketplace off must drop its commands without a manual /reload-skills."""
+    from gateway import marketplace_watcher
+    from gateway import run as gateway_run
+    from gateway.config import GatewayConfig
+    from hermes_constants import get_hermes_home
+
+    checkout = tmp_path / "marketplace"
+    (checkout / "plugins" / "skills").mkdir(parents=True)
+    config_path = get_hermes_home() / "config.yaml"
+    config_path.write_text(yaml.safe_dump(_config(checkout)), encoding="utf-8")
+    runner = gateway_run.GatewayRunner.__new__(gateway_run.GatewayRunner)
+    runner.config = GatewayConfig()
+    runner._running = True
+    reloads, rounds, clock = [], [], [0.0]
+
+    async def record_reload():
+        reloads.append(len(rounds))
+        return {}
+
+    async def next_round(_interval):
+        rounds.append(None)
+        clock[0] += 3600  # every profile is due again next round
+        if len(rounds) == 1:
+            config_path.write_text(yaml.safe_dump(_config(checkout, enabled=False)), encoding="utf-8")
+        else:
+            runner._running = False
+
+    monkeypatch.setattr(marketplace_updater, "update_marketplace_worktree", lambda _config: False)
+    monkeypatch.setattr(runner, "_reload_skills_runtime", record_reload)
+    monkeypatch.setattr(marketplace_watcher.asyncio, "sleep", next_round)
+    monkeypatch.setattr(marketplace_watcher.time, "monotonic", lambda: clock[0])
+
+    await runner._marketplace_skills_watcher()
+
+    assert reloads == [1]  # nothing on the enabled round, one reload once it was disabled
+
+
 def test_update_refuses_checkout_outside_external_skill_roots(monkeypatch, tmp_path: Path):
     repo = tmp_path / "marketplace"
     repo.mkdir()
@@ -199,6 +238,26 @@ def test_update_fast_forwards_and_unchanged_is_noop(monkeypatch, tmp_path: Path)
     assert marketplace_updater.update_marketplace_worktree(_config(checkout))
     assert (skills / "SKILL.md").read_text(encoding="utf-8") == "v2"
     assert not marketplace_updater.update_marketplace_worktree(_config(checkout))
+
+
+def test_update_refuses_a_fetched_tree_whose_skills_root_escapes(monkeypatch, tmp_path: Path):
+    """A fast-forward that turns skills_path into a symlink must not reach the served checkout."""
+    seed, checkout, skills = _repositories(tmp_path)
+    monkeypatch.setattr("agent.skill_utils.get_external_skills_dirs", lambda: [skills])
+    monkeypatch.setattr(marketplace_updater, "_fetch", lambda repo, remote, branch: _git(repo, "fetch", remote, branch))
+    _git(seed, "rm", "-r", "-q", "plugins/skills")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (seed / "plugins").mkdir(exist_ok=True)
+    (seed / "plugins" / "skills").symlink_to(outside, target_is_directory=True)
+    _git(seed, "add", "plugins/skills")
+    _git(seed, "commit", "-m", "escape")
+    _git(seed, "push")
+    before = _git(checkout, "rev-parse", "HEAD")
+
+    assert not marketplace_updater.update_marketplace_worktree(_config(checkout))
+    assert _git(checkout, "rev-parse", "HEAD") == before
+    assert (skills / "SKILL.md").read_text(encoding="utf-8") == "v1"
 
 
 def test_update_refuses_dirty_checkout(monkeypatch, tmp_path: Path):

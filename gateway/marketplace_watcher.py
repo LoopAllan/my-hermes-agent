@@ -44,20 +44,30 @@ def _bootstrap_profile(home: Path, user_config: Dict[str, Any]) -> None:
         _external_dirs_cache_clear()  # discovery cached the root while it was still missing
 
 
-async def _update_profile(runner: Any, home: Path) -> float:
-    """Update one profile's marketplace inside its scope; return seconds until it is due again."""
+async def _update_profile(runner: Any, home: Path, served_roots: Dict[Path, Path]) -> float:
+    """Update one profile's marketplace inside its scope; return seconds until it is due again.
+
+    ``served_roots`` remembers each profile's loaded skill root, so disabling the marketplace or
+    pointing it elsewhere also reloads (slash-command caches are not keyed by the config).
+    """
     from gateway.marketplace_updater import marketplace_config, update_marketplace_worktree
     from gateway.run import _async_profile_runtime_scope
     from hermes_cli.config import load_config_readonly
     async with _async_profile_runtime_scope(home):
         user_config = load_config_readonly()
         settings = marketplace_config(user_config)
+        previous_root = served_roots.pop(home, None)
         if not settings:
+            if previous_root is not None:
+                await runner._reload_skills_runtime()
             return _RECHECK_SECONDS
+        served_roots[home] = settings.skills_dir
         if not settings.repo_dir.exists():
             await runner._run_in_executor_with_context(_bootstrap_profile, home, user_config)
             await runner._reload_skills_runtime()
-        elif await runner._run_in_executor_with_context(update_marketplace_worktree, user_config):
+        elif await runner._run_in_executor_with_context(update_marketplace_worktree, user_config) or (
+            previous_root is not None and previous_root != settings.skills_dir
+        ):
             await runner._reload_skills_runtime()
         return settings.interval_seconds
 
@@ -66,13 +76,14 @@ async def run_marketplace_watcher(runner: Any) -> None:
     """Supervised loop; profiles added by served-profile reconcile are picked up on the next tick."""
     from hermes_constants import hermes_home_key
     next_due: Dict[str, float] = {}
+    served_roots: Dict[Path, Path] = {}
     while runner._running:
         for home in _profile_homes(runner):
             key = hermes_home_key(home)
             if time.monotonic() < next_due.get(key, 0.0):
                 continue
             try:
-                delay = await _update_profile(runner, home)
+                delay = await _update_profile(runner, home, served_roots)
             except asyncio.CancelledError:
                 raise
             except Exception:

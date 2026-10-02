@@ -72,6 +72,20 @@ def _fetch(repo: Path, remote: str, branch: str) -> None:
         )
 
 
+def _skills_root_is_tree(repo: Path, revision: str, skills_path: Path) -> bool:
+    """True when ``skills_path`` is a directory in ``revision``'s own tree.
+
+    Bootstrap validates containment once; a later fast-forward could turn the root (or a parent)
+    into a symlink that discovery would follow out of the checkout. ``rev:path`` lookup never
+    traverses a symlink entry, so anything but ``tree`` means the root left the repository.
+    """
+    try:
+        kind = _git(repo, "cat-file", "-t", f"{revision}:{skills_path.as_posix()}")
+    except subprocess.CalledProcessError:
+        return False
+    return kind == "tree"
+
+
 def update_marketplace_worktree(config: dict[str, Any]) -> bool:
     """Fast-forward an allowed external skill checkout; never overwrite local state."""
     settings = marketplace_config(config)
@@ -97,6 +111,12 @@ def update_marketplace_worktree(config: dict[str, Any]) -> bool:
         if target == current:
             return False
         if _is_ancestor(repo, current, target):
+            if not _skills_root_is_tree(repo, target, settings.skills_path):
+                logger.warning(
+                    "marketplace update %s does not keep %s a real directory; refusing update",
+                    target, settings.skills_path,
+                )
+                return False
             _git(repo, "merge", "--ff-only", target)
             logger.info("marketplace advanced to %s", target)
             return True
