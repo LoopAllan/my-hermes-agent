@@ -1911,7 +1911,9 @@ class TurnRunner:
             model, runtime_kwargs = runner._resolve_session_agent_runtime(
                 source=ctx.source, session_key=ctx.session_key, user_config=ctx.user_config,
             )
-            resolved_model = runner._apply_message_model_alias(ctx.message, model, ctx.user_config)
+            from gateway.message_model_aliases import user_authored_text
+            resolved_model = runner._apply_message_model_alias(
+                user_authored_text(ctx.inbound_message_id, ctx.message), model, ctx.user_config)
             self._message_model_alias_applied = resolved_model != model
             model = resolved_model
             # Stashed by _resolve_session_agent_runtime when the primary's credentials failed and a

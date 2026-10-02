@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 import re
-from typing import Any
+import threading
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -42,3 +44,30 @@ def resolve_message_model_alias(
         if re.search(rf"\b{re.escape(alias)}\b", user_message, flags=re.IGNORECASE):
             return MessageModelAlias(alias=alias, model=model.strip())
     return None
+
+
+# What the user typed, by inbound message id, captured before skill scaffolds or media enrichment
+# rewrite ``event.text``. A small LRU, so re-resolving within one turn sees the same text.
+_USER_AUTHORED_TEXT: "OrderedDict[str, str]" = OrderedDict()
+_USER_AUTHORED_TEXT_LIMIT = 512
+_USER_AUTHORED_TEXT_LOCK = threading.Lock()
+
+
+def remember_user_authored_text(event: Any) -> None:
+    """Record an admitted event's own text so alias matching never sees expanded content."""
+    message_id, text = getattr(event, "message_id", None), getattr(event, "text", None)
+    if not message_id or not isinstance(text, str) or getattr(event, "internal", False):
+        return
+    with _USER_AUTHORED_TEXT_LOCK:
+        _USER_AUTHORED_TEXT[str(message_id)] = text
+        _USER_AUTHORED_TEXT.move_to_end(str(message_id))
+        while len(_USER_AUTHORED_TEXT) > _USER_AUTHORED_TEXT_LIMIT:
+            _USER_AUTHORED_TEXT.popitem(last=False)
+
+
+def user_authored_text(inbound_message_id: Optional[str], fallback: Optional[str]) -> Optional[str]:
+    """The recorded user text for this turn, or ``fallback`` when none was captured."""
+    if not inbound_message_id:
+        return fallback
+    with _USER_AUTHORED_TEXT_LOCK:
+        return _USER_AUTHORED_TEXT.get(str(inbound_message_id), fallback)

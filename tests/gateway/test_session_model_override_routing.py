@@ -16,6 +16,7 @@ import pytest
 
 import gateway.run as gateway_run
 from gateway.config import Platform
+from gateway.platforms.event import MessageEvent
 from gateway.session import SessionSource
 
 
@@ -28,7 +29,7 @@ class _CapturingAgent:
         type(self).last_init = dict(kwargs)
         self.tools = []
 
-    def run_conversation(self, user_message: str, conversation_history=None, task_id=None):
+    def run_conversation(self, user_message: str, conversation_history=None, task_id=None, **_turn_kwargs):
         return {
             "final_response": "ok",
             "messages": [],
@@ -165,6 +166,42 @@ def test_run_agent_applies_message_alias_to_current_turn(monkeypatch):
     assert _CapturingAgent.last_init["model"] == "gpt5.6-sol"
     assert _CapturingAgent.last_init["provider"] == "openai-codex"
     runner._sync_session_model_from_agent.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("authored", "expanded", "expected_model"),
+    [
+        ("/review the logs", "[skill scaffold: ask Sol for a second opinion]\n\nthe logs", "gpt-5.4"),
+        ("Sol, /review the logs", "[skill scaffold]\n\nthe logs", "gpt5.6-sol"),
+    ],
+)
+def test_message_alias_matches_only_user_authored_text(monkeypatch, authored, expanded, expected_model):
+    """Skill scaffolds and media enrichment are not the user's words; only what they typed picks a model."""
+    from gateway.message_model_aliases import remember_user_authored_text
+
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Sol": {"model": "gpt5.6-sol"}}}},
+    )
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _CapturingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+    _CapturingAgent.last_init = None
+    runner = _make_runner()
+    runner._sync_session_model_from_agent = MagicMock()
+    source = SessionSource(platform=Platform.LOCAL, chat_id="cli", chat_name="CLI", chat_type="dm", user_id="user-1")
+    session_key = "agent:main:local:dm"
+    runner._session_model_overrides[session_key] = _codex_override()
+    remember_user_authored_text(MessageEvent(text=authored, source=source, message_id="inbound-1"))
+
+    asyncio.run(runner._run_agent(
+        message=expanded, context_prompt="", history=[], source=source,
+        session_id="session-1", session_key=session_key, inbound_message_id="inbound-1",
+    ))
+
+    assert _CapturingAgent.last_init["model"] == expected_model
 
 
 @pytest.mark.asyncio
