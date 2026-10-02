@@ -1489,26 +1489,8 @@ class GatewayStartupMixin:
                     await asyncio.sleep(0)
 
     async def _marketplace_skills_watcher(self) -> None:
-        """Fast-forward the launch profile's opt-in marketplace inside its scope."""
-        from gateway.marketplace_updater import marketplace_config, update_marketplace_worktree
-        from hermes_cli.config import load_config_readonly
-        from gateway.run import _async_profile_runtime_scope
-        from hermes_constants import get_hermes_home
-        async with _async_profile_runtime_scope(get_hermes_home()):
-            user_config = load_config_readonly()
-            settings = marketplace_config(user_config)
-            if not settings:
-                return
-            while self._running:
-                try:
-                    changed = await self._run_in_executor_with_context(update_marketplace_worktree, user_config)
-                    if changed:
-                        await self._reload_skills_runtime()
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.exception("marketplace skills watcher failed")
-                await asyncio.sleep(settings.interval_seconds)
+        from gateway.marketplace_watcher import run_marketplace_watcher
+        await run_marketplace_watcher(self)
 
     # Long-lived supervised watchers spawned at the end of start(), in order; supervised name = method
     # name minus the leading underscore.

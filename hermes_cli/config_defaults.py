@@ -1434,7 +1434,8 @@ DEFAULT_CONFIG = {
     # and resolved; read-only — creation goes to ~/.hermes/skills/ unless create_dir redirects it.
     "skills": {
         "external_dirs": [],   # e.g. ["~/.agents/skills", "/shared/team-skills"]
-        # Optional in-process fast-forward updater for one trusted external Git checkout.
+        # Optional trusted Git checkout of skills: cloned at container start, fast-forwarded and
+        # hot-reloaded in process; repo_dir/skills_path is discovered like an external_dirs entry.
         "marketplace": {
             "enabled": False,
             "repository": "",

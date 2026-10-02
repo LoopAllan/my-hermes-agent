@@ -52,6 +52,38 @@ class TestGetExternalSkillsDirs:
 
 
 
+class TestMarketplaceSkillsDiscovery:
+    """Enabling ``skills.marketplace`` alone must make the checkout's skills usable."""
+
+    def test_enabled_marketplace_skills_are_discovered_without_external_dirs(self, hermes_home):
+        marketplace_skills = hermes_home / "marketplace" / "plugins" / "skills"
+        skill_dir = marketplace_skills / "market-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: market-skill\ndescription: From the marketplace\n---\n\nBody.\n", encoding="utf-8"
+        )
+        (hermes_home / "config.yaml").write_text(
+            "skills:\n  marketplace:\n    enabled: true\n    repo_dir: marketplace\n", encoding="utf-8"
+        )
+        with (
+            patch.dict(os.environ, {"HERMES_HOME": str(hermes_home)}),
+            patch("tools.skills_tool.SKILLS_DIR", hermes_home / "skills"),
+        ):
+            from agent.skill_utils import get_external_skills_dirs
+            from tools.skills_tool import _find_all_skills
+            assert get_external_skills_dirs() == [marketplace_skills.resolve()]
+            assert "market-skill" in [s["name"] for s in _find_all_skills()]
+
+    def test_disabled_marketplace_is_not_discovered(self, hermes_home):
+        (hermes_home / "marketplace" / "plugins" / "skills").mkdir(parents=True)
+        (hermes_home / "config.yaml").write_text(
+            "skills:\n  marketplace:\n    enabled: false\n    repo_dir: marketplace\n", encoding="utf-8"
+        )
+        with patch.dict(os.environ, {"HERMES_HOME": str(hermes_home)}):
+            from agent.skill_utils import get_external_skills_dirs
+            assert get_external_skills_dirs() == []
+
+
 class TestGetAllSkillsDirs:
     def test_local_always_first(self, hermes_home, external_skills_dir):
         (hermes_home / "config.yaml").write_text(

@@ -1,12 +1,15 @@
 """Shared parsing and validation for the configured skills marketplace."""
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 import hermes_yaml as yaml
+
+logger = logging.getLogger(__name__)
 
 
 class MarketplaceConfigError(ValueError):
@@ -23,6 +26,11 @@ class MarketplaceConfig:
     remote: str
     branch: str
     interval_seconds: int
+
+    @property
+    def skills_dir(self) -> Path:
+        """Skill root inside the checkout, registered for discovery and updates."""
+        return self.repo_dir / self.skills_path
 
 
 def _single_line_string(settings: Mapping[str, Any], field: str, default: str = "") -> str:
@@ -100,6 +108,21 @@ def load_marketplace_config(
         branch=branch,
         interval_seconds=interval_seconds,
     )
+
+
+def marketplace_external_dirs(skills_settings: Mapping[str, Any]) -> list[str]:
+    """The enabled marketplace's skill root as an extra ``skills.external_dirs`` entry.
+
+    Lets ``skills.marketplace`` alone make its checkout discoverable (and admitted by the
+    updater) without a duplicate ``external_dirs`` entry. Invalid settings add nothing; the
+    gateway updater logs them.
+    """
+    try:
+        settings = load_marketplace_config({"skills": skills_settings})
+    except MarketplaceConfigError as exc:
+        logger.debug("ignoring invalid skills.marketplace for discovery: %s", exc)
+        return []
+    return [str(settings.skills_dir)] if settings is not None else []
 
 
 def load_marketplace_config_file(

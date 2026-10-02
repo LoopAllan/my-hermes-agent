@@ -2,6 +2,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import hermes_yaml as yaml
 
 from gateway import marketplace_updater
 from gateway.marketplace_config import MarketplaceConfig
@@ -56,33 +57,87 @@ def test_marketplace_config_is_opt_in_and_validates_values():
 
 
 @pytest.mark.asyncio
-async def test_gateway_watcher_reads_marketplace_from_full_user_config(monkeypatch, tmp_path: Path):
+async def test_gateway_watcher_updates_every_served_profile_in_its_own_scope(monkeypatch, tmp_path: Path):
+    """A multiplexed gateway keeps each served profile's marketplace current, not just the launch one."""
     from gateway import run as gateway_run
+    from gateway import marketplace_watcher
     from gateway.config import GatewayConfig
-    from hermes_cli import config as user_config
+    from hermes_constants import get_hermes_home
 
-    full_config = _config(tmp_path / "marketplace")
-    received = []
+    launch_home = get_hermes_home()
+    served_home = tmp_path / "profiles" / "work"
+    served_home.mkdir(parents=True)
+    expected = {}
+    for home, name in ((launch_home, "launch"), (served_home, "work")):
+        config = _config(tmp_path / f"{name}-marketplace")
+        (home / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+        expected[str(home)] = config["skills"]["marketplace"]["repo_dir"]
+
     runner = gateway_run.GatewayRunner.__new__(gateway_run.GatewayRunner)
     runner.config = GatewayConfig()
     runner._running = True
-
-    monkeypatch.setattr(user_config, "load_config_readonly", lambda: full_config)
+    runner._served_profile_homes = {"default": launch_home, "work": served_home}
+    received = {}
 
     def update(config):
-        received.append(config)
-        runner._running = False
+        received[str(get_hermes_home())] = config["skills"]["marketplace"]["repo_dir"]
         return False
 
-    async def skip_sleep(_interval):
-        return None
+    async def stop_after_first_round(_interval):
+        runner._running = False
 
-    monkeypatch.setattr(gateway_run.asyncio, "sleep", skip_sleep)
+    monkeypatch.setattr(marketplace_watcher.asyncio, "sleep", stop_after_first_round)
     monkeypatch.setattr(marketplace_updater, "update_marketplace_worktree", update)
 
     await runner._marketplace_skills_watcher()
 
-    assert received == [full_config]
+    assert received == expected
+
+
+@pytest.mark.asyncio
+async def test_gateway_watcher_hot_reloads_skills_pushed_to_the_marketplace(monkeypatch, tmp_path: Path):
+    """A skill pushed upstream becomes a live slash command after one watcher round, no restart."""
+    from agent.skill_utils import _external_dirs_cache_clear
+    from gateway import run as gateway_run
+    from gateway import marketplace_watcher
+    from gateway.config import GatewayConfig
+    from hermes_constants import get_hermes_home
+
+    seed, checkout, _ = _repositories(tmp_path)
+    (get_hermes_home() / "config.yaml").write_text(yaml.safe_dump(_config(checkout)), encoding="utf-8")
+    _external_dirs_cache_clear()
+    monkeypatch.setattr(marketplace_updater, "_fetch", lambda repo, remote, branch: _git(repo, "fetch", remote, branch))
+    new_skill = seed / "plugins" / "skills" / "market-new"
+    new_skill.mkdir()
+    (new_skill / "SKILL.md").write_text(
+        "---\nname: market-new\ndescription: Pushed upstream\n---\n\nBody.\n", encoding="utf-8"
+    )
+    _git(seed, "add", ".")
+    _git(seed, "commit", "-m", "add skill")
+    _git(seed, "push")
+
+    runner = gateway_run.GatewayRunner.__new__(gateway_run.GatewayRunner)
+    runner.config = GatewayConfig()
+    runner._running = True
+    runner.adapters = {}
+    reloads = []
+    original_reload = runner._reload_skills_runtime
+
+    async def recording_reload():
+        reloads.append(await original_reload())
+        return reloads[-1]
+
+    async def stop_after_first_round(_interval):
+        runner._running = False
+
+    monkeypatch.setattr(runner, "_reload_skills_runtime", recording_reload)
+    monkeypatch.setattr(marketplace_watcher.asyncio, "sleep", stop_after_first_round)
+
+    await runner._marketplace_skills_watcher()
+
+    from agent.skill_commands import get_skill_commands
+    assert len(reloads) == 1
+    assert "/market-new" in get_skill_commands()
 
 
 def test_update_refuses_checkout_outside_external_skill_roots(monkeypatch, tmp_path: Path):
@@ -176,3 +231,21 @@ def test_fetch_rejects_vault_values_that_require_shell_evaluation(monkeypatch, t
 
     with pytest.raises(RuntimeError, match="MARKETPLACE_GIT_AUTH_TOKEN"):
         marketplace_updater._fetch(tmp_path, "origin", "main")
+
+
+def test_update_accepts_checkout_registered_only_by_marketplace_settings(monkeypatch, tmp_path: Path):
+    """``skills.marketplace`` alone registers the skill root, so the updater's guard admits it."""
+    from agent.skill_utils import _external_dirs_cache_clear
+    from hermes_constants import get_hermes_home
+
+    seed, checkout, skills = _repositories(tmp_path)
+    config = _config(checkout)
+    (get_hermes_home() / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    _external_dirs_cache_clear()
+    monkeypatch.setattr(marketplace_updater, "_fetch", lambda repo, remote, branch: _git(repo, "fetch", remote, branch))
+    (seed / "plugins" / "skills" / "SKILL.md").write_text("v2", encoding="utf-8")
+    _git(seed, "commit", "-am", "v2")
+    _git(seed, "push")
+
+    assert marketplace_updater.update_marketplace_worktree(config)
+    assert (skills / "SKILL.md").read_text(encoding="utf-8") == "v2"
