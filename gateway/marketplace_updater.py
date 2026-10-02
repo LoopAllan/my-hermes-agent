@@ -72,6 +72,26 @@ def _fetch(repo: Path, remote: str, branch: str) -> None:
         )
 
 
+def _normalized_remote(url: str) -> str:
+    url = url.strip().rstrip("/")
+    return url[:-4] if url.endswith(".git") else url
+
+
+def _remote_is_configured_repository(repo: Path, remote: str, repository: str) -> bool:
+    """The fetch carries the Vault token, so its target must be the configured repository.
+
+    ``git remote get-url`` applies ``insteadOf`` rewrites, i.e. it names where Git will connect;
+    a ``.git/config`` edited to point elsewhere leaves ``git status`` clean, so check it here.
+    """
+    if not repository:
+        return False
+    try:
+        effective = _git(repo, "remote", "get-url", remote)
+    except subprocess.CalledProcessError:
+        return False
+    return _normalized_remote(effective) == _normalized_remote(repository)
+
+
 def _skills_root_is_tree(repo: Path, revision: str, skills_path: Path) -> bool:
     """True when ``skills_path`` is a directory in ``revision``'s own tree.
 
@@ -104,6 +124,12 @@ def update_marketplace_worktree(config: dict[str, Any]) -> bool:
             return False
         if _git(repo, "status", "--porcelain"):
             logger.warning("marketplace checkout is dirty; refusing update")
+            return False
+        if not _remote_is_configured_repository(repo, settings.remote, settings.repository):
+            logger.warning(
+                "marketplace remote %r is not skills.marketplace.repository; refusing authenticated fetch",
+                settings.remote,
+            )
             return False
         _fetch(repo, settings.remote, settings.branch)
         target = _git(repo, "rev-parse", "FETCH_HEAD")

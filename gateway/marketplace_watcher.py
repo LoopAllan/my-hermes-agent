@@ -29,6 +29,14 @@ def _profile_homes(runner: Any) -> List[Path]:
     return list(homes.values())
 
 
+def _needs_bootstrap(repo_dir: Path) -> bool:
+    """Missing, or an empty directory (e.g. pre-created by a volume provisioner). A non-empty
+    directory that is not a checkout is left alone: the updater reports it, nothing deletes it."""
+    if not repo_dir.exists():
+        return True
+    return repo_dir.is_dir() and not repo_dir.is_symlink() and not any(repo_dir.iterdir())
+
+
 def _bootstrap_profile(home: Path, user_config: Dict[str, Any]) -> None:
     """First clone (and root SOUL.md) for a profile whose checkout does not exist yet.
 
@@ -92,7 +100,7 @@ async def _update_profile(
                 await _reload_profile_skills(runner, home, is_launch_home)
             return _RECHECK_SECONDS
         served_roots[home] = settings.skills_dir
-        if not settings.repo_dir.exists():
+        if _needs_bootstrap(settings.repo_dir):
             await runner._run_in_executor_with_context(_bootstrap_profile, home, user_config)
             await _reload_profile_skills(runner, home, is_launch_home)
         elif await runner._run_in_executor_with_context(update_marketplace_worktree, user_config) or (

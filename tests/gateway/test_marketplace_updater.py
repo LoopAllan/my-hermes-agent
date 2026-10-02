@@ -10,6 +10,8 @@ from gateway.marketplace_config import MarketplaceConfig
 
 def _config(repo: Path, **overrides):
     settings = {"enabled": True, "repo_dir": str(repo), "remote": "origin", "branch": "main"}
+    if (repo / ".git").exists():  # as bootstrapped: repository is the checkout's origin
+        settings["repository"] = _git(repo, "remote", "get-url", "origin")
     settings.update(overrides)
     return {"skills": {"marketplace": settings}}
 
@@ -70,7 +72,7 @@ async def test_gateway_watcher_updates_every_served_profile_in_its_own_scope(mon
     expected = {}
     for home, name in ((launch_home, "launch"), (served_home, "work")):
         config = _config(tmp_path / f"{name}-marketplace")
-        (tmp_path / f"{name}-marketplace").mkdir()  # existing checkouts take the update path
+        (tmp_path / f"{name}-marketplace" / ".git").mkdir(parents=True)  # existing checkouts take the update path
         (home / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
         expected[str(home)] = config["skills"]["marketplace"]["repo_dir"]
 
@@ -152,6 +154,47 @@ async def test_gateway_watcher_bootstraps_a_missing_checkout_in_the_profile_scop
 
     served_home = tmp_path / "profiles" / "work"
     served_home.mkdir(parents=True)
+    config = _config(served_home / "marketplace", repository="https://example.test/m.git")
+    (served_home / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    runner = gateway_run.GatewayRunner.__new__(gateway_run.GatewayRunner)
+    runner.config = GatewayConfig()
+    runner._running = True
+    runner._served_profile_homes = {"work": served_home}
+    bootstrapped, reloads = [], []
+
+    def fake_run(self):
+        bootstrapped.append((self.hermes_home, self.config.repo_dir, get_hermes_home()))
+        self.config.skills_dir.mkdir(parents=True)
+
+    async def record_reload(_runner, home, _is_launch_home):
+        reloads.append((str(home), str(get_hermes_home())))
+
+    async def stop_after_first_round(_interval):
+        runner._running = False
+
+    monkeypatch.setattr(marketplace_bootstrap.MarketplaceBootstrap, "run", fake_run)
+    monkeypatch.setattr(marketplace_updater, "update_marketplace_worktree", lambda _config: False)
+    monkeypatch.setattr(marketplace_watcher, "_reload_profile_skills", record_reload)
+    monkeypatch.setattr(marketplace_watcher.asyncio, "sleep", stop_after_first_round)
+
+    await runner._marketplace_skills_watcher()
+
+    assert bootstrapped == [(served_home, served_home / "marketplace", served_home)]
+    assert reloads == [(str(served_home), str(served_home))]
+
+
+@pytest.mark.asyncio
+async def test_gateway_watcher_bootstraps_a_precreated_empty_checkout_dir(monkeypatch, tmp_path: Path):
+    """An empty repo_dir pre-created by a volume provisioner is not a checkout: bootstrap it."""
+    from gateway import marketplace_bootstrap
+    from gateway import marketplace_watcher
+    from gateway import run as gateway_run
+    from gateway.config import GatewayConfig
+    from hermes_constants import get_hermes_home
+
+    served_home = tmp_path / "profiles" / "work"
+    served_home.mkdir(parents=True)
+    (served_home / "marketplace").mkdir()
     config = _config(served_home / "marketplace", repository="https://example.test/m.git")
     (served_home / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
     runner = gateway_run.GatewayRunner.__new__(gateway_run.GatewayRunner)
@@ -328,6 +371,19 @@ def test_update_refuses_a_fetched_tree_whose_skills_root_escapes(monkeypatch, tm
     assert not marketplace_updater.update_marketplace_worktree(_config(checkout))
     assert _git(checkout, "rev-parse", "HEAD") == before
     assert (skills / "SKILL.md").read_text(encoding="utf-8") == "v1"
+
+
+def test_update_never_sends_the_token_to_a_rewritten_remote(monkeypatch, tmp_path: Path):
+    """The Vault token only goes to the configured repository, whatever .git/config now says."""
+    _, checkout, skills = _repositories(tmp_path)
+    monkeypatch.setattr("agent.skill_utils.get_external_skills_dirs", lambda: [skills])
+    config = _config(checkout)
+    _git(checkout, "remote", "set-url", "origin", "https://attacker.example/steal.git")
+    monkeypatch.setattr(
+        marketplace_updater, "_fetch", lambda *args: (_ for _ in ()).throw(AssertionError("token sent"))
+    )
+
+    assert not marketplace_updater.update_marketplace_worktree(config)
 
 
 def test_update_refuses_dirty_checkout(monkeypatch, tmp_path: Path):
