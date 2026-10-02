@@ -48,7 +48,7 @@ class MarketplaceBootstrap:
             parent_fd = self._open_parent(home_fd, relative_repository.parts[:-1])
             try:
                 final_name = relative_repository.name
-                self._remove_existing_repository(parent_fd, final_name)
+                self._require_replaceable_repository(parent_fd, final_name)
                 temporary_name = tempfile.mkdtemp(
                     prefix=".marketplace-clone-", dir=self._fd_path(parent_fd)
                 )
@@ -59,13 +59,7 @@ class MarketplaceBootstrap:
                     self._install_soul(
                         clone_dir / "SOUL.md", Path(self._fd_path(home_fd)) / "SOUL.md"
                     )
-                    # rename(2) replaces a raced final symlink itself, never its target.
-                    os.replace(
-                        temporary_name,
-                        final_name,
-                        src_dir_fd=parent_fd,
-                        dst_dir_fd=parent_fd,
-                    )
+                    self._swap_in_clone(parent_fd, temporary_name, final_name)
                     temporary_name = ""
                 finally:
                     if temporary_name:
@@ -101,17 +95,33 @@ class MarketplaceBootstrap:
         return descriptor
 
     @staticmethod
-    def _remove_existing_repository(parent_fd: int, final_name: str) -> None:
+    def _require_replaceable_repository(parent_fd: int, final_name: str) -> None:
         try:
             metadata = os.stat(final_name, dir_fd=parent_fd, follow_symlinks=False)
         except FileNotFoundError:
             return
         if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
             raise RuntimeError("marketplace repository directory must be a real directory")
+
+    @staticmethod
+    def _swap_in_clone(parent_fd: int, temporary_name: str, final_name: str) -> None:
+        """Replace the served checkout only after the new clone validated; a failed clone keeps it."""
+        retired = f".marketplace-retired-{os.getpid()}-{final_name}"
         try:
-            shutil.rmtree(final_name, dir_fd=parent_fd)
+            # rename(2) moves a raced final symlink itself, never its target.
+            os.rename(final_name, retired, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        except FileNotFoundError:
+            retired = ""
+        os.replace(temporary_name, final_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        if not retired:
+            return
+        if stat.S_ISLNK(os.stat(retired, dir_fd=parent_fd, follow_symlinks=False).st_mode):
+            os.unlink(retired, dir_fd=parent_fd)
+            return
+        try:
+            shutil.rmtree(retired, dir_fd=parent_fd)
         except OSError as exc:
-            raise RuntimeError("cannot safely remove marketplace repository directory") from exc
+            raise RuntimeError("cannot safely remove the replaced marketplace checkout") from exc
 
     def _clone(self, clone_dir: Path, parent_fd: int) -> None:
         # /proc/self/fd is resolved by Git's process, so explicitly inherit the

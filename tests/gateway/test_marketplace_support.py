@@ -304,3 +304,35 @@ def test_vault_file_comes_from_the_active_profile_scope(
     finally:
         secret_scope.reset_secret_scope(token)
         secret_scope.set_multiplex_active(False)
+
+
+@pytest.mark.platforms("linux")
+def test_failed_clone_keeps_the_existing_checkout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A transient Git failure on restart must not delete the checkout that is still serving skills."""
+    import subprocess
+
+    home = tmp_path / "home"
+    repository = home / "marketplace" / "repository"
+    (repository / "plugins" / "skills").mkdir(parents=True)
+    (repository / "plugins" / "skills" / "SKILL.md").write_text("serving", encoding="utf-8")
+    config = load_marketplace_config(_settings(repository), require_bootstrap=True)
+    assert config is not None
+
+    class FakeGitAuth:
+        def __enter__(self) -> dict[str, str]:
+            return {}
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def failing_clone(args: list[str], **kwargs: object) -> None:
+        raise subprocess.CalledProcessError(128, args)
+
+    monkeypatch.setattr(marketplace_bootstrap.GitAuthEnvironment, "from_vault", lambda: FakeGitAuth())
+    monkeypatch.setattr(marketplace_bootstrap.subprocess, "run", failing_clone)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        marketplace_bootstrap.MarketplaceBootstrap(home, config).run()
+
+    assert (repository / "plugins" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "serving"
+    assert [p.name for p in repository.parent.iterdir()] == ["repository"]
