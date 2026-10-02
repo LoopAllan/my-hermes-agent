@@ -130,3 +130,16 @@ def test_user_authored_text_is_scoped_to_its_routed_profile():
 
     assert user_authored_text(work, "7", "expanded") == "plain question"
     assert user_authored_text(home, "7", "expanded") == "Sol, take this one"
+
+
+def test_user_authored_text_falls_back_to_the_source_message_id():
+    """Relayed interactions carry their id on the source only; their text must still be recorded."""
+    from gateway.config import Platform
+    from gateway.message_model_aliases import remember_user_authored_text, user_authored_text
+    from gateway.platforms.event import MessageEvent
+    from gateway.session import SessionSource
+
+    source = SessionSource(platform=Platform.DISCORD, chat_id="chan", chat_type="channel", message_id="ix-9")
+    remember_user_authored_text(MessageEvent(text="/review the logs", source=source))
+
+    assert user_authored_text(source, None, "[skill scaffold mentioning Sol]") == "/review the logs"

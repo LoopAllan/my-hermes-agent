@@ -128,10 +128,13 @@ def _text_key(source: Any, message_id: Any) -> tuple:
 
 def remember_user_authored_text(event: Any) -> None:
     """Record an admitted event's own text so alias matching never sees expanded content."""
-    message_id, text = getattr(event, "message_id", None), getattr(event, "text", None)
+    source = getattr(event, "source", None)
+    # Relayed interactions carry their id only on the source.
+    message_id = getattr(event, "message_id", None) or getattr(source, "message_id", None)
+    text = getattr(event, "text", None)
     if not message_id or not isinstance(text, str) or getattr(event, "internal", False):
         return
-    key = _text_key(getattr(event, "source", None), message_id)
+    key = _text_key(source, message_id)
     with _USER_AUTHORED_TEXT_LOCK:
         _USER_AUTHORED_TEXT[key] = text
         _USER_AUTHORED_TEXT.move_to_end(key)
@@ -143,7 +146,8 @@ def user_authored_text(
     source: Any, inbound_message_id: Optional[str], fallback: Optional[str]
 ) -> Optional[str]:
     """The recorded user text for this conversation's turn, or ``fallback`` when none was captured."""
-    if not inbound_message_id:
+    message_id = inbound_message_id or getattr(source, "message_id", None)
+    if not message_id:
         return fallback
     with _USER_AUTHORED_TEXT_LOCK:
-        return _USER_AUTHORED_TEXT.get(_text_key(source, inbound_message_id), fallback)
+        return _USER_AUTHORED_TEXT.get(_text_key(source, message_id), fallback)
