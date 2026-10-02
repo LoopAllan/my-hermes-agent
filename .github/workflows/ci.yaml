@@ -110,28 +110,10 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────
   # Lane-gated sub-workflows. Each runs in parallel after detect finishes.
   # Skipped workflows (if condition is false) don't spin up runners.
+  # Fork policy: lanes over five minutes (tests, tests-os, js-tests,
+  # e2e-desktop-core, e2e-desktop-update) are not run on PRs or pushes;
+  # their reusable workflows stay callable for manual runs.
   # ─────────────────────────────────────────────────────────────────────
-  tests:
-    name: Python tests
-    needs: detect
-    if: needs.detect.outputs.python == 'true'
-    uses: ./.github/workflows/tests.yml
-
-  # macOS + Windows lanes. The main `tests` lane above is Linux-only, and
-  # the OS-marked tests it collects are skipped there by design (see the
-  # `_OS_MARKS` comment in tests/conftest.py) — this is where they run.
-  # Same `python` lane gate: if no Python changed, neither runs.
-  tests-os:
-    name: OS-specific tests
-    needs: detect
-    if: needs.detect.outputs.python == 'true'
-    uses: ./.github/workflows/tests-os.yml
-    with:
-      # The Windows lane spawns the real desktop-update hand-off script
-      # (tests/test_desktop_update_windows_*.py) only when that surface
-      # changed; unit-level platforms("windows") tests always run.
-      desktop_updater: ${{ needs.detect.outputs.desktop_updater == 'true' }}
-
   lint:
     name: Python lints
     needs: detect
@@ -139,12 +121,6 @@ jobs:
     uses: ./.github/workflows/lint.yml
     with:
       event_name: ${{ needs.detect.outputs.event_name }}
-
-  js-tests:
-    name: JS & TS checks
-    needs: detect
-    if: needs.detect.outputs.frontend == 'true'
-    uses: ./.github/workflows/js-tests.yml
 
   rust-tests:
     name: Rust tests
@@ -180,24 +156,6 @@ jobs:
     #   if: ${{ needs.detect.outputs.python_prod == 'true' || needs.detect.outputs.frontend == 'true' }}
     if: false
     uses: ./.github/workflows/e2e-desktop.yml
-
-  e2e-desktop-core:
-    name: Desktop core E2E
-    needs: detect
-    # The deterministic core suite (apps/desktop/e2e/core): transcript
-    # integrity, boot/respawn/orphans, clarify+approval. Required; retries 0.
-    if: ${{ needs.detect.outputs.python_prod == 'true' || needs.detect.outputs.frontend == 'true' }}
-    uses: ./.github/workflows/e2e-desktop-core.yml
-
-  e2e-desktop-update:
-    name: Desktop update E2E
-    needs: detect
-    # apps/desktop/e2e/update: a real install.sh install + packaged Desktop,
-    # first run, "Update now" hand-off/relaunch, concurrent-update refusal.
-    # Advisory until it has proven stable on CI: its shards run with continue-on-error, so a
-    # red shard shows on the PR but does not fail all-checks-pass.
-    if: ${{ needs.detect.outputs.python_prod == 'true' || needs.detect.outputs.frontend == 'true' }}
-    uses: ./.github/workflows/e2e-desktop-update.yml
 
   docs-site:
     name: Docs Site
@@ -301,15 +259,10 @@ jobs:
     name: All required checks pass
     needs:
       - detect
-      - tests
-      - tests-os
       - lint
-      - js-tests
       - rust-tests
       - bootstrap-installer
       - e2e-desktop
-      - e2e-desktop-core
-      - e2e-desktop-update
       - docs-site
       - history-check
 

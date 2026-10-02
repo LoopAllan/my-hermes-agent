@@ -1,4 +1,4 @@
-"""Keep PR #40's restored test lanes wired to standard hosted runners."""
+"""Keep fork CI on hosted runners and limited to lanes under five minutes."""
 from pathlib import Path
 import hermes_yaml as yaml
 
@@ -9,25 +9,28 @@ def workflow(name):
     return yaml.safe_load((ROOT / '.github/workflows' / name).read_text())
 
 
-def test_full_python_suite_and_e2e_are_preserved():
-    jobs = workflow('tests.yml')['jobs']
-    suite = jobs['test']
-    assert suite['runs-on'] == 'ubuntu-latest'
-    steps = [step for step in suite['steps'] if step.get('name') == 'Run tests']
-    assert len(steps) == 1
-    assert steps[0]['run'].strip() == 'scripts/run_tests.sh'
-    assert 1 <= int(steps[0]['env']['HERMES_TEST_WORKERS']) <= 4
-    assert suite['timeout-minutes'] >= 120
-    assert 'e2e' in jobs and 'e2e-upgrade' in jobs
-    upgrade = jobs['e2e-upgrade']
-    baseline_step = next(
-        step for step in upgrade['steps']
-        if step.get('name') == 'Fetch and verify release baseline'
-    )
-    assert 'https://github.com/NousResearch/hermes-agent.git' in baseline_step['run']
-    assert "'refs/tags/v20*:refs/tags/v20*'" in baseline_step['run']
-    assert "git describe --tags --abbrev=0 --match 'v20[0-9][0-9].*' HEAD~1" in baseline_step['run']
-    assert workflow('ci.yaml')['jobs']['tests']['uses'] == './.github/workflows/tests.yml'
+_LANES_OVER_FIVE_MINUTES = {'tests', 'tests-os', 'js-tests', 'e2e-desktop-core', 'e2e-desktop-update'}
+_WORKFLOWS_OVER_FIVE_MINUTES = (
+    'pm-bundle.yml', 'windows-bundle-sdk.yml', 'install-e2e.yml', 'nix.yml', 'docker.yml',
+)
+
+
+def _triggers(name):
+    # YAML 1.1 parses the bare ``on`` key as boolean True.
+    data = workflow(name)
+    return set(data.get('on', data.get(True)) or {})
+
+
+def test_fork_ci_runs_only_fast_lanes_automatically():
+    """Fork policy: nothing over five minutes runs on PRs, pushes or schedules; it stays dispatchable."""
+    jobs = workflow('ci.yaml')['jobs']
+    assert _LANES_OVER_FIVE_MINUTES.isdisjoint(jobs)
+    assert _LANES_OVER_FIVE_MINUTES.isdisjoint(jobs['all-checks-pass']['needs'])
+    assert {'lint', 'rust-tests', 'review-labels', 'supply-chain'} <= jobs.keys()
+    for name in _WORKFLOWS_OVER_FIVE_MINUTES:
+        triggers = _triggers(name)
+        assert triggers.isdisjoint({'pull_request', 'push', 'schedule'}), name
+        assert triggers & {'workflow_dispatch', 'workflow_call'}, name
 
 
 def test_native_windows_both_architectures_and_current_selector():
