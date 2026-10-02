@@ -56,11 +56,16 @@ class MarketplaceBootstrap:
                     clone_dir = Path(self._fd_path(parent_fd)) / temporary_name
                     self._clone(clone_dir, parent_fd)
                     self._validate_clone(clone_dir)
-                    self._install_soul(
-                        clone_dir / "SOUL.md", Path(self._fd_path(home_fd)) / "SOUL.md"
-                    )
-                    self._swap_in_clone(parent_fd, temporary_name, final_name)
-                    temporary_name = ""
+                    soul_target = Path(self._fd_path(home_fd)) / "SOUL.md"
+                    # SOUL.md and the checkout commit together: stage the identity, swap the
+                    # checkout, then publish the identity; a failed swap commits neither.
+                    staged_soul = self._stage_soul(clone_dir / "SOUL.md", soul_target)
+                    try:
+                        self._swap_in_clone(parent_fd, temporary_name, final_name)
+                        temporary_name = ""
+                        os.replace(staged_soul, soul_target)
+                    finally:
+                        staged_soul.unlink(missing_ok=True)
                 finally:
                     if temporary_name:
                         shutil.rmtree(temporary_name, dir_fd=parent_fd)
@@ -158,7 +163,8 @@ class MarketplaceBootstrap:
             raise RuntimeError("configured skills directory is missing")
 
     @staticmethod
-    def _install_soul(source: Path, target: Path) -> None:
+    def _stage_soul(source: Path, target: Path) -> Path:
+        """Validate the clone's SOUL.md and write it, fsynced, beside ``target``; return that path."""
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         try:
             descriptor = os.open(source, flags)
@@ -184,21 +190,19 @@ class MarketplaceBootstrap:
             if descriptor >= 0:
                 os.close(descriptor)
 
-        temporary_path: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                dir=target.parent, prefix=".SOUL.md.", delete=False
-            ) as temporary:
-                temporary_path = Path(temporary.name)
+        with tempfile.NamedTemporaryFile(
+            dir=target.parent, prefix=".SOUL.md.", delete=False
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            try:
                 os.fchmod(temporary.fileno(), 0o600)
                 temporary.write(content)
                 temporary.flush()
                 os.fsync(temporary.fileno())
-            os.replace(temporary_path, target)
-            temporary_path = None
-        finally:
-            if temporary_path is not None:
+            except BaseException:
                 temporary_path.unlink(missing_ok=True)
+                raise
+        return temporary_path
 
 
 def main() -> int:

@@ -336,3 +336,41 @@ def test_failed_clone_keeps_the_existing_checkout(monkeypatch: pytest.MonkeyPatc
 
     assert (repository / "plugins" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "serving"
     assert [p.name for p in repository.parent.iterdir()] == ["repository"]
+
+
+@pytest.mark.platforms("linux")
+def test_failed_checkout_swap_leaves_the_profile_soul_untouched(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """SOUL.md and the skills checkout change together: a failed swap commits neither."""
+    home = tmp_path / "home"
+    repository = home / "marketplace" / "repository"
+    repository.mkdir(parents=True)
+    (home / "SOUL.md").write_text("old soul", encoding="utf-8")
+    config = load_marketplace_config(_settings(repository), require_bootstrap=True)
+    assert config is not None
+
+    class FakeGitAuth:
+        def __enter__(self) -> dict[str, str]:
+            return {}
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def fake_clone(args: list[str], **kwargs: object) -> None:
+        target = Path(args[-1])
+        (target / "plugins" / "skills").mkdir(parents=True)
+        (target / "SOUL.md").write_text("new soul", encoding="utf-8")
+
+    def failing_swap(*args: object) -> None:
+        raise OSError("destination raced")
+
+    monkeypatch.setattr(marketplace_bootstrap.GitAuthEnvironment, "from_vault", lambda: FakeGitAuth())
+    monkeypatch.setattr(marketplace_bootstrap.subprocess, "run", fake_clone)
+    monkeypatch.setattr(marketplace_bootstrap.MarketplaceBootstrap, "_swap_in_clone", staticmethod(failing_swap))
+
+    with pytest.raises(OSError, match="destination raced"):
+        marketplace_bootstrap.MarketplaceBootstrap(home, config).run()
+
+    assert (home / "SOUL.md").read_text(encoding="utf-8") == "old soul"
+    assert sorted(p.name for p in home.iterdir()) == ["SOUL.md", "marketplace"]
