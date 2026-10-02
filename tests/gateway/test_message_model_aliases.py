@@ -95,3 +95,22 @@ def test_user_authored_text_is_scoped_to_its_conversation():
 
     assert user_authored_text(first, "42", "expanded") == "plain question"
     assert user_authored_text(second, "42", "expanded") == "Sol, take this one"
+
+
+def test_aliases_reach_the_resolver_through_the_gateway_config_loader():
+    """message_aliases written to config.yaml survive the effective gateway loader intact."""
+    import hermes_yaml as yaml
+    from gateway.run import _load_gateway_config
+    from hermes_constants import get_hermes_home
+
+    (get_hermes_home() / "config.yaml").write_text(yaml.safe_dump({
+        "model": {
+            "default": "anthropic/claude-opus-4.8",
+            "message_aliases": {"Luna": {"model": "moonshot/kimi-k3", "provider": "openrouter"}},
+        },
+    }), encoding="utf-8")
+
+    resolved = resolve_message_model_alias("Luna, summarize this.", _load_gateway_config())
+
+    assert resolved is not None
+    assert (resolved.model, resolved.provider) == ("moonshot/kimi-k3", "openrouter")

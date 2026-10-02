@@ -96,6 +96,15 @@ model:
   # api_key: "your-key-here"  # Uncomment to set here instead of .env
   base_url: "https://openrouter.ai/api/v1"
 
+  # Per-message model aliases (messaging gateway): naming an alias in a message runs that
+  # turn only on its model; "provider" is optional and routes through that provider.
+  # message_aliases:
+  #   Sol:
+  #     model: "gpt-5.6-sol"
+  #   Luna:
+  #     model: "moonshot/kimi-k3"
+  #     provider: "openrouter"
+
   # Stream API responses from the provider (default: true). The agent core
   # prefers streaming for every turn — subagents included — for liveness
   # health-checking. Set false to force non-streaming requests for the whole
