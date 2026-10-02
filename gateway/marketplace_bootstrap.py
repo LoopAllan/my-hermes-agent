@@ -63,7 +63,11 @@ class MarketplaceBootstrap:
                     try:
                         retired = self._swap_in_clone(parent_fd, temporary_name, final_name)
                         temporary_name = ""
-                        os.replace(staged_soul, soul_target)
+                        try:
+                            os.replace(staged_soul, soul_target)
+                        except BaseException:
+                            self._roll_back_swap(parent_fd, final_name, retired)
+                            raise
                     finally:
                         staged_soul.unlink(missing_ok=True)
                     self._discard_retired(parent_fd, retired)
@@ -129,6 +133,16 @@ class MarketplaceBootstrap:
                 os.rename(retired, final_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
             raise
         return retired
+
+    @classmethod
+    def _roll_back_swap(cls, parent_fd: int, final_name: str, retired: str) -> None:
+        """SOUL.md could not be published: put the previous checkout back (or none, on a first
+        install, so the watcher retries the bootstrap) and drop the new clone."""
+        failed = f".marketplace-failed-{os.getpid()}-{final_name}"
+        os.rename(final_name, failed, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        if retired:
+            os.rename(retired, final_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        cls._discard_retired(parent_fd, failed)
 
     @staticmethod
     def _discard_retired(parent_fd: int, retired: str) -> None:

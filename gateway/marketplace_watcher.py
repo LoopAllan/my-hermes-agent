@@ -45,18 +45,18 @@ def _bootstrap_profile(home: Path, user_config: Dict[str, Any]) -> None:
         _external_dirs_cache_clear()  # discovery cached the root while it was still missing
 
 
-async def _reload_profile_skills(runner: Any, home: Path) -> None:
+async def _reload_profile_skills(runner: Any, home: Path, is_launch_home: bool) -> None:
     """Rescan the profile's skills; never re-point an adapter another profile shares.
 
-    The primary profile reloads as ``/reload-skills`` does. A shared-bot satellite rescans in its
-    own scope but refreshes only adapters it owns: its ``_adapters_for_profile`` view includes the
-    primary's adapter, whose single catalog belongs to the primary profile.
+    The launch (primary) profile reloads as ``/reload-skills`` does. A shared-bot satellite
+    rescans in its own scope but refreshes only adapters it owns: its ``_adapters_for_profile``
+    view includes the primary's adapter, whose single catalog belongs to the primary profile.
     """
-    from hermes_constants import profile_name_for_home
-    profile = profile_name_for_home(home)
-    if profile == (getattr(runner, "_primary_profile_name", None) or "default"):
+    if is_launch_home:
         await runner._reload_skills_runtime()
         return
+    from hermes_constants import profile_name_for_home
+    profile = profile_name_for_home(home)
     from agent.skill_commands import reload_skills
     await runner._run_in_executor_with_context(reload_skills)
     shared = {id(adapter) for adapter in (getattr(runner, "adapters", None) or {}).values()}
@@ -72,7 +72,9 @@ async def _reload_profile_skills(runner: Any, home: Path) -> None:
             logger.warning("Adapter %s refresh_skill_group raised: %s", getattr(adapter, "name", adapter), exc)
 
 
-async def _update_profile(runner: Any, home: Path, served_roots: Dict[Path, Path]) -> float:
+async def _update_profile(
+    runner: Any, home: Path, served_roots: Dict[Path, Path], is_launch_home: bool,
+) -> float:
     """Update one profile's marketplace inside its scope; return seconds until it is due again.
 
     ``served_roots`` remembers each profile's loaded skill root, so disabling the marketplace or
@@ -87,22 +89,24 @@ async def _update_profile(runner: Any, home: Path, served_roots: Dict[Path, Path
         previous_root = served_roots.pop(home, None)
         if not settings:
             if previous_root is not None:
-                await _reload_profile_skills(runner, home)
+                await _reload_profile_skills(runner, home, is_launch_home)
             return _RECHECK_SECONDS
         served_roots[home] = settings.skills_dir
         if not settings.repo_dir.exists():
             await runner._run_in_executor_with_context(_bootstrap_profile, home, user_config)
-            await _reload_profile_skills(runner, home)
+            await _reload_profile_skills(runner, home, is_launch_home)
         elif await runner._run_in_executor_with_context(update_marketplace_worktree, user_config) or (
             previous_root is not None and previous_root != settings.skills_dir
         ):
-            await _reload_profile_skills(runner, home)
+            await _reload_profile_skills(runner, home, is_launch_home)
         return settings.interval_seconds
 
 
 async def run_marketplace_watcher(runner: Any) -> None:
     """Supervised loop; profiles added by served-profile reconcile are picked up on the next tick."""
-    from hermes_constants import hermes_home_key
+    from hermes_constants import get_hermes_home, hermes_home_key
+    # Captured outside any profile scope: the home whose adapters are ``runner.adapters``.
+    launch_key = hermes_home_key(get_hermes_home())
     next_due: Dict[str, float] = {}
     served_roots: Dict[Path, Path] = {}
     while runner._running:
@@ -111,7 +115,7 @@ async def run_marketplace_watcher(runner: Any) -> None:
             if time.monotonic() < next_due.get(key, 0.0):
                 continue
             try:
-                delay = await _update_profile(runner, home, served_roots)
+                delay = await _update_profile(runner, home, served_roots, key == launch_key)
             except asyncio.CancelledError:
                 raise
             except Exception:

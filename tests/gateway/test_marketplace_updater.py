@@ -164,7 +164,7 @@ async def test_gateway_watcher_bootstraps_a_missing_checkout_in_the_profile_scop
         bootstrapped.append((self.hermes_home, self.config.repo_dir, get_hermes_home()))
         self.config.skills_dir.mkdir(parents=True)
 
-    async def record_reload(_runner, home):
+    async def record_reload(_runner, home, _is_launch_home):
         reloads.append((str(home), str(get_hermes_home())))
 
     async def stop_after_first_round(_interval):
@@ -257,6 +257,38 @@ async def test_secondary_profile_reload_leaves_the_shared_primary_adapter_alone(
 
     shared.refresh_skill_group.assert_not_called()
     own.refresh_skill_group.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_launch_profile_reload_refreshes_its_adapters_whatever_its_profile_name(monkeypatch, tmp_path: Path):
+    """A single-profile gateway (custom HERMES_HOME) is the primary: its adapters get the new catalog."""
+    from unittest.mock import MagicMock
+
+    from gateway import marketplace_watcher
+    from gateway import run as gateway_run
+    from gateway.config import GatewayConfig, Platform
+    from hermes_constants import get_hermes_home
+
+    (tmp_path / "marketplace" / "plugins" / "skills").mkdir(parents=True)
+    (get_hermes_home() / "config.yaml").write_text(yaml.safe_dump(_config(tmp_path / "marketplace")), encoding="utf-8")
+    adapter = MagicMock()
+    runner = gateway_run.GatewayRunner.__new__(gateway_run.GatewayRunner)
+    runner.config = GatewayConfig()
+    runner._running = True
+    runner._primary_profile_name = "custom"  # active-profile naming, not profile_name_for_home's
+    runner.adapters = {Platform.DISCORD: adapter}
+    runner._adapters_for_profile = lambda profile: {Platform.DISCORD: adapter}
+
+    async def stop_after_first_round(_interval):
+        runner._running = False
+
+    monkeypatch.setattr(marketplace_updater, "update_marketplace_worktree", lambda _config: True)
+    monkeypatch.setattr("agent.skill_commands.reload_skills", lambda: {"added": [], "removed": []})
+    monkeypatch.setattr(marketplace_watcher.asyncio, "sleep", stop_after_first_round)
+
+    await runner._marketplace_skills_watcher()
+
+    adapter.refresh_skill_group.assert_called_once()
 
 
 def test_update_refuses_checkout_outside_external_skill_roots(monkeypatch, tmp_path: Path):
