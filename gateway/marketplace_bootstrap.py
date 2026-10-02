@@ -61,11 +61,12 @@ class MarketplaceBootstrap:
                     # checkout, then publish the identity; a failed swap commits neither.
                     staged_soul = self._stage_soul(clone_dir / "SOUL.md", soul_target)
                     try:
-                        self._swap_in_clone(parent_fd, temporary_name, final_name)
+                        retired = self._swap_in_clone(parent_fd, temporary_name, final_name)
                         temporary_name = ""
                         os.replace(staged_soul, soul_target)
                     finally:
                         staged_soul.unlink(missing_ok=True)
+                    self._discard_retired(parent_fd, retired)
                 finally:
                     if temporary_name:
                         shutil.rmtree(temporary_name, dir_fd=parent_fd)
@@ -109,8 +110,11 @@ class MarketplaceBootstrap:
             raise RuntimeError("marketplace repository directory must be a real directory")
 
     @staticmethod
-    def _swap_in_clone(parent_fd: int, temporary_name: str, final_name: str) -> None:
-        """Replace the served checkout only after the new clone validated; a failed clone keeps it."""
+    def _swap_in_clone(parent_fd: int, temporary_name: str, final_name: str) -> str:
+        """Replace the served checkout only after the new clone validated; a failed clone keeps it.
+
+        Returns the retired checkout's name ("" when there was none) for the caller to discard once
+        the matching SOUL.md is published."""
         retired = f".marketplace-retired-{os.getpid()}-{final_name}"
         try:
             # rename(2) moves a raced final symlink itself, never its target.
@@ -124,15 +128,20 @@ class MarketplaceBootstrap:
                 # Put the served checkout back; the caller removes the unused clone.
                 os.rename(retired, final_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
             raise
+        return retired
+
+    @staticmethod
+    def _discard_retired(parent_fd: int, retired: str) -> None:
+        """Best-effort: the new revision is already live, so a leftover tree only wastes space."""
         if not retired:
             return
-        if stat.S_ISLNK(os.stat(retired, dir_fd=parent_fd, follow_symlinks=False).st_mode):
-            os.unlink(retired, dir_fd=parent_fd)
-            return
         try:
-            shutil.rmtree(retired, dir_fd=parent_fd)
+            if stat.S_ISLNK(os.stat(retired, dir_fd=parent_fd, follow_symlinks=False).st_mode):
+                os.unlink(retired, dir_fd=parent_fd)
+            else:
+                shutil.rmtree(retired, dir_fd=parent_fd)
         except OSError as exc:
-            raise RuntimeError("cannot safely remove the replaced marketplace checkout") from exc
+            print(f"marketplace bootstrap: warning: cannot remove {retired}: {exc}", file=sys.stderr)
 
     def _clone(self, clone_dir: Path, parent_fd: int) -> None:
         # /proc/self/fd is resolved by Git's process, so explicitly inherit the

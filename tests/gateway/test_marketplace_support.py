@@ -435,3 +435,42 @@ def test_repo_dir_placeholders_resolve_in_the_active_profile_scope(
 
     assert config is not None
     assert "launch-checkout" not in str(config.repo_dir)
+
+
+@pytest.mark.platforms("linux")
+def test_retired_checkout_cleanup_failure_still_publishes_a_consistent_revision(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Cleanup of the old tree is best-effort and runs after SOUL.md matches the new checkout."""
+    home = tmp_path / "home"
+    repository = home / "marketplace" / "repository"
+    (repository / "plugins" / "skills").mkdir(parents=True)
+    (home / "SOUL.md").write_text("old soul", encoding="utf-8")
+    config = load_marketplace_config(_settings(repository), require_bootstrap=True)
+    assert config is not None
+
+    class FakeGitAuth:
+        def __enter__(self) -> dict[str, str]:
+            return {}
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def fake_clone(args: list[str], **kwargs: object) -> None:
+        target = Path(args[-1])
+        (target / "plugins" / "skills").mkdir(parents=True)
+        (target / "plugins" / "skills" / "SKILL.md").write_text("new", encoding="utf-8")
+        (target / "SOUL.md").write_text("new soul", encoding="utf-8")
+
+    def failing_rmtree(path: str, *args: object, **kwargs: object) -> None:
+        raise OSError("device busy")
+
+    monkeypatch.setattr(marketplace_bootstrap.GitAuthEnvironment, "from_vault", lambda: FakeGitAuth())
+    monkeypatch.setattr(marketplace_bootstrap.subprocess, "run", fake_clone)
+    monkeypatch.setattr(marketplace_bootstrap.shutil, "rmtree", failing_rmtree)
+
+    marketplace_bootstrap.MarketplaceBootstrap(home, config).run()
+
+    assert (repository / "plugins" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "new"
+    assert (home / "SOUL.md").read_text(encoding="utf-8") == "new soul"
+    assert "device busy" in capsys.readouterr().err
