@@ -371,8 +371,10 @@ def get_external_skills_dirs() -> List[Path]:
     local_skills = get_skills_dir().resolve()
     result: List[Path] = []
     from gateway.marketplace_config import marketplace_external_dirs
-    for entry in [*_config_str_list(skills_cfg.get("external_dirs")), *marketplace_external_dirs(skills_cfg)]:
-        p = _home_relative(_expand_path(entry)).resolve()
+    # Marketplace roots arrive already scope-expanded and home-anchored; never re-expand them.
+    candidates = [_expand_path(entry) for entry in _config_str_list(skills_cfg.get("external_dirs"))]
+    for entry in [*candidates, *map(Path, marketplace_external_dirs(skills_cfg))]:
+        p = _home_relative(entry).resolve()
         if p == local_skills or p in result:
             continue
         if p.is_dir():

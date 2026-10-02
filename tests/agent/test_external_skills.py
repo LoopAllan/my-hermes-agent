@@ -84,6 +84,31 @@ class TestMarketplaceSkillsDiscovery:
             assert get_external_skills_dirs() == []
 
 
+class TestMarketplacePathScope:
+    def test_secondary_profile_never_discovers_the_launch_profiles_marketplace(self, hermes_home):
+        """An unresolved ${VAR} stays unresolved: discovery must not re-expand it from os.environ."""
+        from agent import secret_scope
+
+        launch_skills = hermes_home / "launch" / "repository" / "plugins" / "skills"
+        launch_skills.mkdir(parents=True)
+        (hermes_home / "config.yaml").write_text(
+            "skills:\n  marketplace:\n    enabled: true\n    repo_dir: ${MARKETPLACE_ROOT}/repository\n",
+            encoding="utf-8",
+        )
+        secret_scope.set_multiplex_active(True)
+        token = secret_scope.set_secret_scope({}, profile_home=str(hermes_home))
+        try:
+            with patch.dict(os.environ, {"HERMES_HOME": str(hermes_home), "MARKETPLACE_ROOT": "launch"}):
+                from agent.skill_utils import _external_dirs_cache_clear, get_external_skills_dirs
+                _external_dirs_cache_clear()
+                dirs = get_external_skills_dirs()
+        finally:
+            secret_scope.reset_secret_scope(token)
+            secret_scope.set_multiplex_active(False)
+
+        assert launch_skills.resolve() not in dirs
+
+
 class TestGetAllSkillsDirs:
     def test_local_always_first(self, hermes_home, external_skills_dir):
         (hermes_home / "config.yaml").write_text(
