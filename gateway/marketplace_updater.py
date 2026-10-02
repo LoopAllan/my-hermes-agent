@@ -11,7 +11,7 @@ from gateway.marketplace_config import (
     MarketplaceConfigError,
     load_marketplace_config,
 )
-from gateway.marketplace_credentials import GitAuthEnvironment
+from gateway.marketplace_credentials import GitAuthEnvironment, marketplace_git_env
 
 logger = logging.getLogger(__name__)
 
@@ -26,22 +26,8 @@ def marketplace_config(config: dict[str, Any]) -> MarketplaceConfig | None:
 
 
 def _git_env() -> dict[str, str]:
-    """Environment for the plain (unauthenticated) git child processes.
-
-    Built through the canonical factory rather than a raw environ copy:
-    tests/agent/test_subprocess_env_guard.py requires every spawn site to
-    delegate there so profile-home propagation and the secret-scrub policy keep
-    a single owner. ``scrub_secrets=False`` / ``inherit_profile_home=False`` is
-    the documented byte-for-byte-equivalent of the previous raw copy — the
-    authenticated path keeps using GitAuthEnvironment instead.
-    """
-    from tools.environments.local import build_subprocess_env
-
-    return build_subprocess_env(
-        scrub_secrets=False,
-        inherit_profile_home=False,
-        extra={"GIT_TERMINAL_PROMPT": "0"},
-    )
+    """Environment for the plain (unauthenticated) git child processes."""
+    return marketplace_git_env()
 
 
 def _git(repo: Path, *args: str) -> str:

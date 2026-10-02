@@ -48,12 +48,14 @@ def _single_line_string(settings: Mapping[str, Any], field: str, default: str = 
 
 
 def load_marketplace_config(
-    config: Mapping[str, Any], *, require_bootstrap: bool = False
+    config: Mapping[str, Any], *, require_bootstrap: bool = False, hermes_home: Path | None = None
 ) -> MarketplaceConfig | None:
     """Load marketplace settings from the full user configuration.
 
     Disabled or absent settings are an intentional no-op. Enabled settings are
-    validated once here for both the initial clone and in-process updater.
+    validated once here for both the initial clone and in-process updater. A
+    relative ``repo_dir`` is anchored at ``hermes_home`` (default: the active,
+    profile-scoped home), never the process working directory.
     """
     skills = config.get("skills") or {}
     if not isinstance(skills, Mapping):
@@ -99,10 +101,15 @@ def load_marketplace_config(
             "skills.marketplace.skills_path must stay within the repository"
         )
 
-    expanded_repo_dir = os.path.expandvars(os.path.expanduser(repo_dir_value))
+    repo_dir = Path(os.path.expandvars(os.path.expanduser(repo_dir_value)))
+    if not repo_dir.is_absolute():
+        if hermes_home is None:
+            from hermes_constants import get_hermes_home
+            hermes_home = get_hermes_home()
+        repo_dir = Path(hermes_home) / repo_dir
     return MarketplaceConfig(
         repository=repository,
-        repo_dir=Path(expanded_repo_dir),
+        repo_dir=repo_dir,
         skills_path=skills_path,
         remote=remote,
         branch=branch,
@@ -154,4 +161,6 @@ def load_marketplace_config_file(
         config = read_user_config_raw(config_path)
     except (OSError, yaml.YAMLError) as exc:
         raise MarketplaceConfigError(f"cannot read config.yaml: {exc}") from exc
-    return load_marketplace_config(config, require_bootstrap=require_bootstrap)
+    return load_marketplace_config(
+        config, require_bootstrap=require_bootstrap, hermes_home=hermes_home
+    )

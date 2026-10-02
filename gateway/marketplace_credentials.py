@@ -115,6 +115,26 @@ def read_marketplace_token(path: Path) -> str:
     raise RuntimeError(f"{_TOKEN_NAME} is unavailable")
 
 
+def marketplace_git_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Environment for every marketplace Git child: credential-scrubbed, never prompting.
+
+    The process environment is the launch profile's, while the marketplace may belong to any served
+    profile, so provider, bot and GitHub secrets are removed before Git sees them; only ``extra``
+    (the askpass helper and marketplace token) is added back.
+    """
+    from hermes_cli._subprocess_compat import noninteractive_git_env
+    from tools.environments.local import hermes_subprocess_env
+
+    env = noninteractive_git_env(hermes_subprocess_env())
+    # GitHub tokens deliberately pass through to agent children; marketplace Git authenticates
+    # with its own askpass token, so the launch profile's must not ride along.
+    for name in ("GITHUB_TOKEN", "GH_TOKEN"):
+        env.pop(name, None)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env.update(extra or {})
+    return env
+
+
 def _decode_shell_word(rendered: str) -> str:
     """Retain support for legacy unquoted shell words without executing them."""
     words = shlex.split(rendered, posix=True)
@@ -151,15 +171,7 @@ class GitAuthEnvironment:
             temporary_directory.cleanup()
             self._temporary_directory = None
             raise
-        env = os.environ.copy()
-        env.update(
-            {
-                "GIT_TERMINAL_PROMPT": "0",
-                "GIT_ASKPASS": str(askpass),
-                _TOKEN_NAME: token,
-            }
-        )
-        return env
+        return marketplace_git_env({"GIT_ASKPASS": str(askpass), _TOKEN_NAME: token})
 
     def __exit__(
         self,

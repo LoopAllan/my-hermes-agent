@@ -243,3 +243,42 @@ def test_git_auth_environment_refreshes_vault_token_and_cleans_helper(
     vault.write_text('MARKETPLACE_GIT_AUTH_TOKEN="second"\n', encoding="utf-8")
     with GitAuthEnvironment.from_vault() as second:
         assert second["MARKETPLACE_GIT_AUTH_TOKEN"] == "second"
+
+
+def test_marketplace_git_children_never_inherit_launch_secrets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Git runs for whichever profile owns the marketplace; the launch process's secrets stay behind."""
+    from gateway import marketplace_updater
+
+    vault = tmp_path / "vault.env"
+    vault.write_text('MARKETPLACE_GIT_AUTH_TOKEN="scoped"\n', encoding="utf-8")
+    monkeypatch.setenv("MARKETPLACE_VAULT_ENV_FILE", str(vault))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-launch-profile")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "launch-bot")
+    monkeypatch.setenv("GITHUB_TOKEN", "launch-github")
+
+    with GitAuthEnvironment.from_vault() as authenticated:
+        assert authenticated["MARKETPLACE_GIT_AUTH_TOKEN"] == "scoped"
+        assert authenticated["GIT_TERMINAL_PROMPT"] == "0"
+        for env in (authenticated, marketplace_updater._git_env()):
+            assert not {"OPENAI_API_KEY", "TELEGRAM_BOT_TOKEN", "GITHUB_TOKEN"} & set(env)
+    assert "MARKETPLACE_GIT_AUTH_TOKEN" not in marketplace_updater._git_env()
+
+
+def test_relative_repo_dir_resolves_under_the_owning_hermes_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Bootstrap, updater and discovery must agree on where a relative repo_dir lives."""
+    from hermes_constants import get_hermes_home
+
+    home = tmp_path / "profile-home"
+    home.mkdir()
+    monkeypatch.chdir(tmp_path)  # a cwd-relative resolution would land outside the home
+    config = _settings(Path("marketplace/repository"))
+    (home / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    from_file = load_marketplace_config_file(home, require_bootstrap=True)
+    assert from_file is not None and from_file.repo_dir == home / "marketplace" / "repository"
+    in_scope = load_marketplace_config(config)
+    assert in_scope is not None and in_scope.repo_dir == get_hermes_home() / "marketplace" / "repository"
