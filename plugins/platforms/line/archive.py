@@ -35,12 +35,13 @@ _write_lock = threading.Lock()
 _DEFAULT_SUBPATH = ("logs", "line-unmentioned.jsonl")
 
 
-def _resolve_path(path: Optional[str]) -> Path:
-    """Resolve the archive file path.
+def resolve_archive_path(path: Optional[str]) -> Path:
+    """Resolve the archive file path against the CURRENT Hermes home.
 
     An explicit ``path`` (from config) wins; relative paths resolve against the
     Hermes home dir, matching the project-wide convention. With no path, fall
-    back to ``<hermes_home>/logs/line-unmentioned.jsonl``.
+    back to ``<hermes_home>/logs/line-unmentioned.jsonl``. The adapter calls this
+    once at construction, inside its profile scope: webhooks arrive outside it.
     """
     if path:
         p = Path(path).expanduser()
@@ -72,7 +73,7 @@ def append_unmentioned_record(record: dict, *, path: Optional[str] = None) -> No
             except Exception:
                 pass  # redaction is best-effort; never block archiving on it
 
-        target = _resolve_path(path)
+        target = resolve_archive_path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
 

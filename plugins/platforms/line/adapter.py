@@ -394,7 +394,8 @@ class LineAdapter(BasePlatformAdapter):
         self.allowed_rooms = allowlist("LINE_ALLOWED_ROOMS", "allowed_rooms")
         self.require_mention = _truthy_env("LINE_REQUIRE_MENTION", bool(extra.get("require_mention", False)))
         self.archive_unmentioned = _truthy_env("LINE_ARCHIVE_UNMENTIONED", bool(extra.get("archive_unmentioned", False)))
-        self.archive_path = _get_scoped_secret("LINE_ARCHIVE_PATH") or extra.get("archive_path") or None
+        from plugins.platforms.line.archive import resolve_archive_path
+        self.archive_path = str(resolve_archive_path(_get_scoped_secret("LINE_ARCHIVE_PATH") or extra.get("archive_path")))
         # Slow-LLM postback button threshold + user-overridable copy
         threshold = env_or("LINE_SLOW_RESPONSE_THRESHOLD", "slow_response_threshold", DEFAULT_SLOW_RESPONSE_THRESHOLD)
         self.slow_response_threshold = _coerce(float, threshold, DEFAULT_SLOW_RESPONSE_THRESHOLD)

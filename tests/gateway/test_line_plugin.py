@@ -286,6 +286,41 @@ def test_unmentioned_group_message_is_archived(tmp_path):
     assert "ts" in rec
 
 
+def test_default_archive_stays_in_the_home_that_built_the_adapter(tmp_path, monkeypatch):
+    """Webhooks run outside any profile scope; the archive must not follow whichever home is active then."""
+    from gateway.config import PlatformConfig
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+
+    owner_home, other_home = tmp_path / "owner", tmp_path / "other"
+    owner_home.mkdir()
+    other_home.mkdir()
+    monkeypatch.delenv("LINE_ARCHIVE_PATH", raising=False)
+    token = set_hermes_home_override(str(owner_home))
+    try:
+        adapter = LineAdapter(PlatformConfig(enabled=True, extra={
+            "channel_access_token": "tok", "channel_secret": "sec", "allowed_groups": ["Cok"],
+            "require_mention": True, "archive_unmentioned": True,
+        }))
+    finally:
+        reset_hermes_home_override(token)
+    adapter._bot_user_id = "Ubot"
+    adapter._handle_message_event = AsyncMock()
+    event = {
+        "type": "message",
+        "source": {"type": "group", "groupId": "Cok", "userId": "Uok"},
+        "message": {"type": "text", "id": "m1", "text": "chatter"},
+    }
+
+    token = set_hermes_home_override(str(other_home))
+    try:
+        asyncio.run(adapter._dispatch_event(event))
+    finally:
+        reset_hermes_home_override(token)
+
+    assert len(_read_jsonl(owner_home / "logs" / "line-unmentioned.jsonl")) == 1
+    assert not (other_home / "logs").exists()
+
+
 def test_unmentioned_room_sticker_is_archived_with_summary(tmp_path):
     archive = tmp_path / "unmentioned.jsonl"
     adapter = _archive_adapter(archive)
