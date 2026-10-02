@@ -1892,6 +1892,14 @@ class TurnRunner:
         return final_response + "\n" + "\n".join(unique_tags)
 
     def run_sync(self):
+        try:
+            return self._run_sync()
+        finally:
+            # A one-turn alias agent is never cached, so every exit releases it here.
+            if self._one_turn_alias_agent is not None:
+                self._release_evicted_agent(self._one_turn_alias_agent)
+
+    def _run_sync(self):
         """Executor-thread body of the turn; returns the gateway result dict.
 
         The turn message lives on the shared TurnContext (``ctx.message``) so ``_run_agent_inner`` sees
@@ -1983,8 +1991,6 @@ class TurnRunner:
             "context_length": (getattr(comp, "context_length", 0) or 0) if has_comp else 0,
         }
         compacted_in_place, effective_session_id, history_offset = self._sync_session_after_run(agent_history)
-        if self._one_turn_alias_agent is not None:
-            self._release_evicted_agent(self._one_turn_alias_agent)
         # failure_reason must survive the empty-response path too (TUI billing, transient-failure
         # persistence). compression_deferred (soft lock-contention defer) is distinct from
         # compression_exhausted so the gateway never auto-resets a session a concurrent compressor is

@@ -199,6 +199,41 @@ def test_one_turn_alias_keeps_the_sessions_warm_agent_cached(monkeypatch):
     assert len(released) == 1 and isinstance(released[0], _CapturingAgent)
 
 
+def test_one_turn_alias_agent_is_released_when_the_turn_raises(monkeypatch):
+    """The uncached alias agent is released on every exit, not only after a clean turn."""
+    monkeypatch.setattr(
+        gateway_run,
+        "_load_gateway_config",
+        lambda: {"model": {"message_aliases": {"Sol": {"model": "gpt5.6-sol"}}}},
+    )
+    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs", _explode_runtime_resolution)
+
+    class _FailingAgent(_CapturingAgent):
+        def run_conversation(self, *args, **kwargs):
+            raise RuntimeError("provider exploded")
+
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = _FailingAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+    runner = _make_runner()
+    runner._sync_session_model_from_agent = MagicMock()
+    released = []
+    monkeypatch.setattr(runner, "_release_evicted_agent_soft", released.append)
+    source = SessionSource(platform=Platform.LOCAL, chat_id="cli", chat_name="CLI", chat_type="dm", user_id="user-1")
+    session_key = "agent:main:local:dm"
+    runner._session_model_overrides[session_key] = _codex_override()
+
+    try:
+        asyncio.run(runner._run_agent(
+            message="Sol, inspect the error logs.", context_prompt="", history=[], source=source,
+            session_id="session-1", session_key=session_key,
+        ))
+    except RuntimeError:
+        pass
+
+    assert len(released) == 1 and isinstance(released[0], _FailingAgent)
+
+
 def test_message_alias_with_provider_routes_through_that_provider(monkeypatch):
     """An alias for another provider's model gets that provider's full route, like channel_overrides."""
     monkeypatch.setattr(
