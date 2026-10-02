@@ -364,7 +364,7 @@ model:
 - Only what the user typed is matched — text added by slash-skill scaffolds or media enrichment never triggers an alias. `Sol` does not match inside `console`.
 - When several aliases appear, the first one listed in `message_aliases` wins.
 - With `provider`, the turn uses that provider's full route (credentials, endpoint, API mode), like `channel_overrides`; it still answers when the session's own provider is unavailable. Without `provider`, only the model changes on the current route.
-- An aliased turn never changes the session's `/model` override or its cached agent, so the session's prompt cache stays warm.
+- An aliased turn never changes the session's `/model` override. Its exchange stays in the session transcript, and the next turn rebuilds the session's agent from that transcript.
 
 ## Security
 

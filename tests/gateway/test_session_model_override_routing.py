@@ -168,8 +168,9 @@ def test_run_agent_applies_message_alias_to_current_turn(monkeypatch):
     runner._sync_session_model_from_agent.assert_not_called()
 
 
-def test_one_turn_alias_keeps_the_sessions_warm_agent_cached(monkeypatch):
-    """An aliased turn runs on its own agent; the session's cached agent (prompt-cache prefix) survives."""
+def test_aliased_turn_retires_the_sessions_stale_warm_agent(monkeypatch):
+    """The aliased exchange never reaches the cached agent's history, so that agent is retired (and
+    released) instead of serving the next turn a transcript that forgot it; the alias agent is never cached."""
     monkeypatch.setattr(
         gateway_run,
         "_load_gateway_config",
@@ -195,8 +196,9 @@ def test_one_turn_alias_keeps_the_sessions_warm_agent_cached(monkeypatch):
     ))
 
     assert _CapturingAgent.last_init["model"] == "gpt5.6-sol"
-    assert runner._agent_cache[session_key] is warm
-    assert len(released) == 1 and isinstance(released[0], _CapturingAgent)
+    assert session_key not in runner._agent_cache
+    assert len(released) == 2
+    assert warm[0] in released and any(isinstance(agent, _CapturingAgent) for agent in released)
 
 
 def test_one_turn_alias_agent_is_released_when_the_turn_raises(monkeypatch):

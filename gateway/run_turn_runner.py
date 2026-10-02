@@ -1895,9 +1895,22 @@ class TurnRunner:
         try:
             return self._run_sync()
         finally:
-            # A one-turn alias agent is never cached, so every exit releases it here.
             if self._one_turn_alias_agent is not None:
-                self._release_evicted_agent(self._one_turn_alias_agent)
+                self._retire_agents_after_alias_turn()
+
+    def _retire_agents_after_alias_turn(self) -> None:
+        """The one-turn alias agent is never cached; the session's cached agent never saw the aliased
+        exchange, so it is retired too and the next turn rebuilds its history from the transcript."""
+        ctx = self._ctx
+        cache_lock = getattr(self._runner, "_agent_cache_lock", None)
+        cache = getattr(self._runner, "_agent_cache", None)
+        stale = None
+        if cache_lock and cache is not None:
+            with cache_lock:
+                stale = cache.pop(ctx.session_key, None)
+        self._release_evicted_agent(self._one_turn_alias_agent)
+        if stale is not None:
+            self._release_evicted_agent(stale[0])
 
     def _run_sync(self):
         """Executor-thread body of the turn; returns the gateway result dict.
