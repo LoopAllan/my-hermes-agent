@@ -10,7 +10,7 @@ import inspect
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -37,20 +37,28 @@ def _needs_bootstrap(repo_dir: Path) -> bool:
     return repo_dir.is_dir() and not repo_dir.is_symlink() and not any(repo_dir.iterdir())
 
 
-def _bootstrap_profile(home: Path, user_config: Dict[str, Any]) -> None:
-    """First clone (and root SOUL.md) for a profile whose checkout does not exist yet.
+def _bootstrap_profile(home: Path, user_config: Dict[str, Any]) -> bool:
+    """First clone (and root SOUL.md) for a profile whose checkout does not exist yet; True when cloned.
 
     Container init bootstraps only the launch home; served profiles that enable a marketplace
     later get their first clone here, inside their own scope.
     """
     from agent.skill_utils import _external_dirs_cache_clear
-    from gateway.marketplace_bootstrap import MarketplaceBootstrap
+    from gateway.marketplace_bootstrap import MarketplaceBootstrap, bootstrap_supported
     from gateway.marketplace_config import load_marketplace_config
 
     settings = load_marketplace_config(user_config, require_bootstrap=True, hermes_home=home)
-    if settings is not None:
-        MarketplaceBootstrap(home, settings).run()
-        _external_dirs_cache_clear()  # discovery cached the root while it was still missing
+    if settings is None:
+        return False
+    if not bootstrap_supported():
+        logger.warning(
+            "marketplace %s needs a first clone, but the bootstrap only runs on Linux (the container); "
+            "clone %s into %s manually", home, settings.repository, settings.repo_dir,
+        )
+        return False
+    MarketplaceBootstrap(home, settings).run()
+    _external_dirs_cache_clear()  # discovery cached the root while it was still missing
+    return True
 
 
 async def _reload_profile_skills(runner: Any, home: Path, is_launch_home: bool) -> None:
@@ -81,12 +89,13 @@ async def _reload_profile_skills(runner: Any, home: Path, is_launch_home: bool) 
 
 
 async def _update_profile(
-    runner: Any, home: Path, served_roots: Dict[Path, Path], is_launch_home: bool,
+    runner: Any, home: Path, served_roots: Dict[Path, Optional[Path]], is_launch_home: bool,
 ) -> float:
     """Update one profile's marketplace inside its scope; return seconds until it is due again.
 
-    ``served_roots`` remembers each profile's loaded skill root, so disabling the marketplace or
-    pointing it elsewhere also reloads (slash-command caches are not keyed by the config).
+    ``served_roots`` maps each observed profile to its loaded skill root (``None`` while disabled;
+    absent until first observed, when startup already loaded skills). Enabling, disabling or moving
+    the root reloads too: slash-command caches are not keyed by the config.
     """
     from gateway.marketplace_updater import marketplace_config, update_marketplace_worktree
     from gateway.run import _async_profile_runtime_scope
@@ -94,18 +103,20 @@ async def _update_profile(
     async with _async_profile_runtime_scope(home):
         user_config = load_config_readonly()
         settings = marketplace_config(user_config)
-        previous_root = served_roots.pop(home, None)
+        observed = home in served_roots
+        previous_root = served_roots.get(home)
+        served_roots[home] = settings.skills_dir if settings else None
         if not settings:
             if previous_root is not None:
                 await _reload_profile_skills(runner, home, is_launch_home)
             return _RECHECK_SECONDS
-        served_roots[home] = settings.skills_dir
         if _needs_bootstrap(settings.repo_dir):
-            await runner._run_in_executor_with_context(_bootstrap_profile, home, user_config)
+            if not await runner._run_in_executor_with_context(_bootstrap_profile, home, user_config):
+                return _RECHECK_SECONDS
             await _reload_profile_skills(runner, home, is_launch_home)
-        elif await runner._run_in_executor_with_context(update_marketplace_worktree, user_config) or (
-            previous_root is not None and previous_root != settings.skills_dir
-        ):
+            return settings.interval_seconds
+        updated = await runner._run_in_executor_with_context(update_marketplace_worktree, user_config)
+        if updated or (observed and previous_root != settings.skills_dir):
             await _reload_profile_skills(runner, home, is_launch_home)
         return settings.interval_seconds
 
@@ -116,7 +127,7 @@ async def run_marketplace_watcher(runner: Any) -> None:
     # Captured outside any profile scope: the home whose adapters are ``runner.adapters``.
     launch_key = hermes_home_key(get_hermes_home())
     next_due: Dict[str, float] = {}
-    served_roots: Dict[Path, Path] = {}
+    served_roots: Dict[Path, Optional[Path]] = {}
     while runner._running:
         for home in _profile_homes(runner):
             key = hermes_home_key(home)

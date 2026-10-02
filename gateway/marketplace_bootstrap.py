@@ -14,11 +14,20 @@ from gateway.marketplace_config import (
     MarketplaceConfig,
     MarketplaceConfigError,
     load_marketplace_config_file,
+    marketplace_lock,
 )
 from gateway.marketplace_credentials import GitAuthEnvironment, marketplace_git_env
 
 _MAX_SOUL_BYTES = 20_000
-_DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+# getattr keeps the module importable on hosts without these flags; bootstrap_supported() gates use.
+_DIRECTORY_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+
+
+def bootstrap_supported() -> bool:
+    """The bootstrap anchors every path at /proc/self/fd, which only Linux (the container) has."""
+    from hermes_platform.host.facts import os_family
+
+    return os_family().startswith("linux")
 
 
 @dataclass(frozen=True)
@@ -43,6 +52,10 @@ class MarketplaceBootstrap:
         ):
             raise RuntimeError("marketplace repository directory must resolve below HERMES_HOME")
 
+        with marketplace_lock(home_path):
+            self._run_locked(home_path, relative_repository, repository_path)
+
+    def _run_locked(self, home_path: Path, relative_repository: Path, repository_path: Path) -> None:
         home_fd = self._open_directory(home_path)
         try:
             parent_fd = self._open_parent(home_fd, relative_repository.parts[:-1])

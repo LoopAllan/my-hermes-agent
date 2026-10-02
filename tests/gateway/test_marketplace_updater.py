@@ -11,7 +11,10 @@ from gateway.marketplace_config import MarketplaceConfig
 def _config(repo: Path, **overrides):
     settings = {"enabled": True, "repo_dir": str(repo), "remote": "origin", "branch": "main"}
     if (repo / ".git").exists():  # as bootstrapped: repository is the checkout's origin
-        settings["repository"] = _git(repo, "remote", "get-url", "origin")
+        try:
+            settings["repository"] = _git(repo, "remote", "get-url", "origin")
+        except subprocess.CalledProcessError:
+            pass  # a placeholder .git used only to mark "existing checkout"
     settings.update(overrides)
     return {"skills": {"marketplace": settings}}
 
@@ -143,6 +146,7 @@ async def test_gateway_watcher_hot_reloads_skills_pushed_to_the_marketplace(monk
     assert "/market-new" in get_skill_commands()
 
 
+@pytest.mark.platforms("linux")  # the container bootstrap; native hosts are covered below
 @pytest.mark.asyncio
 async def test_gateway_watcher_bootstraps_a_missing_checkout_in_the_profile_scope(monkeypatch, tmp_path: Path):
     """A served profile that enables a marketplace later gets its first clone from the watcher."""
@@ -183,6 +187,7 @@ async def test_gateway_watcher_bootstraps_a_missing_checkout_in_the_profile_scop
     assert reloads == [(str(served_home), str(served_home))]
 
 
+@pytest.mark.platforms("linux")  # the container bootstrap; native hosts are covered below
 @pytest.mark.asyncio
 async def test_gateway_watcher_bootstraps_a_precreated_empty_checkout_dir(monkeypatch, tmp_path: Path):
     """An empty repo_dir pre-created by a volume provisioner is not a checkout: bootstrap it."""
@@ -332,6 +337,78 @@ async def test_launch_profile_reload_refreshes_its_adapters_whatever_its_profile
     await runner._marketplace_skills_watcher()
 
     adapter.refresh_skill_group.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_gateway_watcher_reloads_skills_when_the_marketplace_is_enabled(monkeypatch, tmp_path: Path):
+    """Enabling a marketplace whose checkout is already current must still load its commands."""
+    from gateway import marketplace_watcher
+    from gateway import run as gateway_run
+    from gateway.config import GatewayConfig
+    from hermes_constants import get_hermes_home
+
+    checkout = tmp_path / "marketplace"
+    (checkout / ".git").mkdir(parents=True)
+    config_path = get_hermes_home() / "config.yaml"
+    config_path.write_text(yaml.safe_dump(_config(checkout, enabled=False)), encoding="utf-8")
+    runner = gateway_run.GatewayRunner.__new__(gateway_run.GatewayRunner)
+    runner.config = GatewayConfig()
+    runner._running = True
+    reloads, rounds, clock = [], [], [0.0]
+
+    async def record_reload():
+        reloads.append(len(rounds))
+        return {}
+
+    async def next_round(_interval):
+        rounds.append(None)
+        clock[0] += 3600
+        if len(rounds) == 1:
+            config_path.write_text(yaml.safe_dump(_config(checkout)), encoding="utf-8")
+        else:
+            runner._running = False
+
+    monkeypatch.setattr(marketplace_updater, "update_marketplace_worktree", lambda _config: False)
+    monkeypatch.setattr(runner, "_reload_skills_runtime", record_reload)
+    monkeypatch.setattr(marketplace_watcher.asyncio, "sleep", next_round)
+    monkeypatch.setattr(marketplace_watcher.time, "monotonic", lambda: clock[0])
+
+    await runner._marketplace_skills_watcher()
+
+    assert reloads == [1]  # nothing while disabled, one reload once enabled
+
+
+@pytest.mark.platforms("macos", "windows")
+@pytest.mark.asyncio
+async def test_native_hosts_skip_the_container_bootstrap_with_a_warning(monkeypatch, tmp_path: Path, caplog):
+    """The bootstrap needs /proc/self/fd; elsewhere the watcher says how to proceed instead of failing."""
+    import logging
+
+    from gateway import marketplace_bootstrap, marketplace_watcher
+    from gateway import run as gateway_run
+    from gateway.config import GatewayConfig
+    from hermes_constants import get_hermes_home
+
+    (get_hermes_home() / "config.yaml").write_text(
+        yaml.safe_dump(_config(tmp_path / "missing", repository="https://example.test/m.git")), encoding="utf-8"
+    )
+    runner = gateway_run.GatewayRunner.__new__(gateway_run.GatewayRunner)
+    runner.config = GatewayConfig()
+    runner._running = True
+
+    async def stop_after_first_round(_interval):
+        runner._running = False
+
+    monkeypatch.setattr(
+        marketplace_bootstrap.MarketplaceBootstrap, "run",
+        lambda self: (_ for _ in ()).throw(AssertionError("container bootstrap ran natively")),
+    )
+    monkeypatch.setattr(marketplace_watcher.asyncio, "sleep", stop_after_first_round)
+
+    with caplog.at_level(logging.WARNING, logger="gateway.marketplace_watcher"):
+        await runner._marketplace_skills_watcher()
+
+    assert "only runs on Linux" in caplog.text
 
 
 def test_update_refuses_checkout_outside_external_skill_roots(monkeypatch, tmp_path: Path):
