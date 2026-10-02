@@ -456,8 +456,6 @@ ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
 ENV HERMES_TUI_DIR=/opt/hermes/ui-tui
 ENV HERMES_HOME=/opt/data
 ENV HERMES_WRITE_SAFE_ROOT=/opt/data
-ENV HERMES_DISABLE_LAZY_INSTALLS=1
-# Unset HERMES_DISABLE_LAZY_INSTALLS to opt in to the upstream PM-managed store.
 # Opt-in backend SDKs install on first use into PM dependency generations under
 # /opt/data/installs (the sealed /opt/hermes/.venv is never written); stage2
 # re-resolves them against each new image. security.allow_lazy_installs: false
@@ -468,7 +466,6 @@ ENV HERMES_DISABLE_LAZY_INSTALLS=1
 # volume, which a host-side install may share — two instances would then contend
 # for one lock. Container-scoped instead; seeded 0700 by docker/stage2-hook.sh.
 ENV XDG_RUNTIME_DIR=/tmp/hermes-runtime
-
 
 # `docker exec` privilege-drop shim. When operators run
 # `docker exec <c> hermes ...` they default to root, and any file the
