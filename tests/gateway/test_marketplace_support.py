@@ -282,3 +282,25 @@ def test_relative_repo_dir_resolves_under_the_owning_hermes_home(
     assert from_file is not None and from_file.repo_dir == home / "marketplace" / "repository"
     in_scope = load_marketplace_config(config)
     assert in_scope is not None and in_scope.repo_dir == get_hermes_home() / "marketplace" / "repository"
+
+
+def test_vault_file_comes_from_the_active_profile_scope(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Under multiplex a secondary profile authenticates with its own Vault file, never the launch one."""
+    from agent import secret_scope
+
+    launch_vault, profile_vault = tmp_path / "launch.env", tmp_path / "profile.env"
+    launch_vault.write_text('MARKETPLACE_GIT_AUTH_TOKEN="launch"\n', encoding="utf-8")
+    profile_vault.write_text('MARKETPLACE_GIT_AUTH_TOKEN="profile"\n', encoding="utf-8")
+    monkeypatch.setenv("MARKETPLACE_VAULT_ENV_FILE", str(launch_vault))
+    secret_scope.set_multiplex_active(True)
+    token = secret_scope.set_secret_scope(
+        {"MARKETPLACE_VAULT_ENV_FILE": str(profile_vault)}, profile_home=str(tmp_path / "work")
+    )
+    try:
+        with GitAuthEnvironment.from_vault() as env:
+            assert env["MARKETPLACE_GIT_AUTH_TOKEN"] == "profile"
+    finally:
+        secret_scope.reset_secret_scope(token)
+        secret_scope.set_multiplex_active(False)

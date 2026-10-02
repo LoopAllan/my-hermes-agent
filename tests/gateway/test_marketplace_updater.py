@@ -70,6 +70,7 @@ async def test_gateway_watcher_updates_every_served_profile_in_its_own_scope(mon
     expected = {}
     for home, name in ((launch_home, "launch"), (served_home, "work")):
         config = _config(tmp_path / f"{name}-marketplace")
+        (tmp_path / f"{name}-marketplace").mkdir()  # existing checkouts take the update path
         (home / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
         expected[str(home)] = config["skills"]["marketplace"]["repo_dir"]
 
@@ -138,6 +139,47 @@ async def test_gateway_watcher_hot_reloads_skills_pushed_to_the_marketplace(monk
     from agent.skill_commands import get_skill_commands
     assert len(reloads) == 1
     assert "/market-new" in get_skill_commands()
+
+
+@pytest.mark.asyncio
+async def test_gateway_watcher_bootstraps_a_missing_checkout_in_the_profile_scope(monkeypatch, tmp_path: Path):
+    """A served profile that enables a marketplace later gets its first clone from the watcher."""
+    from gateway import marketplace_bootstrap
+    from gateway import marketplace_watcher
+    from gateway import run as gateway_run
+    from gateway.config import GatewayConfig
+    from hermes_constants import get_hermes_home
+
+    served_home = tmp_path / "profiles" / "work"
+    served_home.mkdir(parents=True)
+    config = _config(served_home / "marketplace", repository="https://example.test/m.git")
+    (served_home / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    runner = gateway_run.GatewayRunner.__new__(gateway_run.GatewayRunner)
+    runner.config = GatewayConfig()
+    runner._running = True
+    runner._served_profile_homes = {"work": served_home}
+    bootstrapped, reloads = [], []
+
+    def fake_run(self):
+        bootstrapped.append((self.hermes_home, self.config.repo_dir, get_hermes_home()))
+        self.config.skills_dir.mkdir(parents=True)
+
+    async def record_reload():
+        reloads.append(str(get_hermes_home()))
+        return {}
+
+    async def stop_after_first_round(_interval):
+        runner._running = False
+
+    monkeypatch.setattr(marketplace_bootstrap.MarketplaceBootstrap, "run", fake_run)
+    monkeypatch.setattr(marketplace_updater, "update_marketplace_worktree", lambda _config: False)
+    monkeypatch.setattr(runner, "_reload_skills_runtime", record_reload)
+    monkeypatch.setattr(marketplace_watcher.asyncio, "sleep", stop_after_first_round)
+
+    await runner._marketplace_skills_watcher()
+
+    assert bootstrapped == [(served_home, served_home / "marketplace", served_home)]
+    assert reloads == [str(served_home)]
 
 
 def test_update_refuses_checkout_outside_external_skill_roots(monkeypatch, tmp_path: Path):

@@ -28,6 +28,22 @@ def _profile_homes(runner: Any) -> List[Path]:
     return list(homes.values())
 
 
+def _bootstrap_profile(home: Path, user_config: Dict[str, Any]) -> None:
+    """First clone (and root SOUL.md) for a profile whose checkout does not exist yet.
+
+    Container init bootstraps only the launch home; served profiles that enable a marketplace
+    later get their first clone here, inside their own scope.
+    """
+    from agent.skill_utils import _external_dirs_cache_clear
+    from gateway.marketplace_bootstrap import MarketplaceBootstrap
+    from gateway.marketplace_config import load_marketplace_config
+
+    settings = load_marketplace_config(user_config, require_bootstrap=True, hermes_home=home)
+    if settings is not None:
+        MarketplaceBootstrap(home, settings).run()
+        _external_dirs_cache_clear()  # discovery cached the root while it was still missing
+
+
 async def _update_profile(runner: Any, home: Path) -> float:
     """Update one profile's marketplace inside its scope; return seconds until it is due again."""
     from gateway.marketplace_updater import marketplace_config, update_marketplace_worktree
@@ -38,7 +54,10 @@ async def _update_profile(runner: Any, home: Path) -> float:
         settings = marketplace_config(user_config)
         if not settings:
             return _RECHECK_SECONDS
-        if await runner._run_in_executor_with_context(update_marketplace_worktree, user_config):
+        if not settings.repo_dir.exists():
+            await runner._run_in_executor_with_context(_bootstrap_profile, home, user_config)
+            await runner._reload_skills_runtime()
+        elif await runner._run_in_executor_with_context(update_marketplace_worktree, user_config):
             await runner._reload_skills_runtime()
         return settings.interval_seconds
 

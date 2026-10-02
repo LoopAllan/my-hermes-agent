@@ -1,7 +1,6 @@
 """Vault token parsing and scoped Git authentication for the marketplace."""
 from __future__ import annotations
 
-import os
 import shlex
 import tempfile
 from dataclasses import dataclass, field
@@ -154,7 +153,10 @@ class GitAuthEnvironment:
 
     @classmethod
     def from_vault(cls) -> GitAuthEnvironment:
-        env_file = os.environ.get("MARKETPLACE_VAULT_ENV_FILE")
+        """Use the ACTIVE profile's Vault file: under multiplex each served profile has its own."""
+        from agent.secret_scope import get_secret
+
+        env_file = get_secret("MARKETPLACE_VAULT_ENV_FILE")
         if not env_file:
             raise RuntimeError("MARKETPLACE_VAULT_ENV_FILE is unavailable")
         return cls(Path(env_file))
