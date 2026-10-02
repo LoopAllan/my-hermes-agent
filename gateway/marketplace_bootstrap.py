@@ -235,6 +235,9 @@ class MarketplaceBootstrap:
                         "--no-tags",
                         "--branch",
                         self.config.branch,
+                        # The updater fetches through this remote name.
+                        "--origin",
+                        self.config.remote,
                         "--",
                         self.config.repository,
                         str(clone_dir),

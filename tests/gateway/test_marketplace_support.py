@@ -655,3 +655,55 @@ def test_checkout_that_gains_local_state_during_the_clone_is_kept(
     assert (home / "SOUL.md").read_text(encoding="utf-8") == "old soul"
     assert [p.name for p in repository.parent.iterdir()] == ["repository"]
     assert "local changes" in capsys.readouterr().err
+
+
+@pytest.mark.platforms("linux")
+def test_bootstrapped_checkout_updates_through_a_custom_remote_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """skills.marketplace.remote names the clone's remote, so the updater can fetch through it."""
+    import subprocess
+
+    from gateway import marketplace_updater
+
+    def git(*args: str, cwd: Path | None = None) -> str:
+        return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+    remote = tmp_path / "remote.git"
+    seed = tmp_path / "seed"
+    git("init", "-q", "--bare", str(remote))
+    git("init", "-q", "-b", "main", str(seed))
+    (seed / "plugins" / "skills").mkdir(parents=True)
+    (seed / "plugins" / "skills" / "SKILL.md").write_text("v1", encoding="utf-8")
+    (seed / "SOUL.md").write_text("soul", encoding="utf-8")
+    for args in (["config", "user.email", "t@t"], ["config", "user.name", "t"], ["add", "-A"],
+                 ["commit", "-qm", "v1"], ["push", "-q", str(remote), "main"]):
+        git(*args, cwd=seed)
+    home = tmp_path / "home"
+    repository = home / "marketplace" / "repository"
+    repository.parent.mkdir(parents=True)
+    settings = _settings(repository, repository=str(remote), remote="market")
+    config = load_marketplace_config(settings, require_bootstrap=True)
+    assert config is not None
+
+    class PlainGit:
+        def __enter__(self) -> dict[str, str]:
+            return dict(os.environ, GIT_TERMINAL_PROMPT="0")
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(marketplace_bootstrap.GitAuthEnvironment, "from_vault", lambda: PlainGit())
+    marketplace_bootstrap.MarketplaceBootstrap(home, config).run()
+    assert git("-C", str(repository), "remote") == "market"
+
+    (seed / "plugins" / "skills" / "SKILL.md").write_text("v2", encoding="utf-8")
+    git("commit", "-qam", "v2", cwd=seed)
+    git("push", "-q", str(remote), "main", cwd=seed)
+    monkeypatch.setattr("agent.skill_utils.get_external_skills_dirs", lambda: [repository / "plugins" / "skills"])
+    monkeypatch.setattr(
+        marketplace_updater, "_fetch", lambda repo, name, branch: git("-C", str(repo), "fetch", "-q", name, branch)
+    )
+
+    assert marketplace_updater.update_marketplace_worktree(settings)
+    assert (repository / "plugins" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "v2"
