@@ -61,25 +61,24 @@ def test_ignores_invalid_alias_entries():
     ) is None
 
 
-def test_gateway_alias_application_is_turn_scoped():
-    from gateway.run import GatewayRunner
+def test_alias_application_changes_only_this_turns_model():
+    from gateway.message_model_aliases import apply_message_model_alias
 
-    runner = object.__new__(GatewayRunner)
-    runner._session_model_overrides = {}
     config = {
         "model": {
             "default": "openai/gpt-5.6-terra",
             "message_aliases": {"Sol": {"model": "gpt5.6-sol"}},
         }
     }
+    runtime = {"provider": "openai"}
 
-    assert runner._apply_message_model_alias(
-        "Sol, inspect the error logs.", "openai/gpt-5.6-terra", config
-    ) == "gpt5.6-sol"
-    assert runner._apply_message_model_alias(
-        "Inspect the error logs.", "openai/gpt-5.6-terra", config
-    ) == "openai/gpt-5.6-terra"
-    assert runner._session_model_overrides == {}
+    assert apply_message_model_alias(
+        "Sol, inspect the error logs.", "openai/gpt-5.6-terra", runtime, config
+    ) == ("gpt5.6-sol", runtime)
+    assert apply_message_model_alias(
+        "Inspect the error logs.", "openai/gpt-5.6-terra", runtime, config
+    ) == ("openai/gpt-5.6-terra", runtime)
+    assert config["model"]["default"] == "openai/gpt-5.6-terra"
 
 
 def test_user_authored_text_is_scoped_to_its_conversation():

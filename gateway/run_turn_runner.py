@@ -1911,11 +1911,12 @@ class TurnRunner:
             model, runtime_kwargs = runner._resolve_session_agent_runtime(
                 source=ctx.source, session_key=ctx.session_key, user_config=ctx.user_config,
             )
-            from gateway.message_model_aliases import user_authored_text
-            resolved_model = runner._apply_message_model_alias(
-                user_authored_text(ctx.source, ctx.inbound_message_id, ctx.message), model, ctx.user_config)
-            self._message_model_alias_applied = resolved_model != model
-            model = resolved_model
+            from gateway.message_model_aliases import apply_message_model_alias, user_authored_text
+            resolved_model, resolved_runtime = apply_message_model_alias(
+                user_authored_text(ctx.source, ctx.inbound_message_id, ctx.message), model, runtime_kwargs,
+                ctx.user_config)
+            self._message_model_alias_applied = (resolved_model, resolved_runtime) != (model, runtime_kwargs)
+            model, runtime_kwargs = resolved_model, resolved_runtime
             # Stashed by _resolve_session_agent_runtime when the primary's credentials failed and a
             # fallback was resolved before any agent exists (#74349); one-shot per turn.
             pending_fallback_notice = getattr(runner, "_pre_agent_fallback_notice", None)

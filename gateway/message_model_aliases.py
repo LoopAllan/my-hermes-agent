@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
+import logging
 import re
 import threading
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -15,6 +18,8 @@ class MessageModelAlias:
 
     alias: str
     model: str
+    # Optional: route this turn through another provider, like ``channel_overrides``.
+    provider: Optional[str] = None
 
 
 def resolve_message_model_alias(
@@ -23,7 +28,8 @@ def resolve_message_model_alias(
 ) -> MessageModelAlias | None:
     """Return the first configured alias present as a complete word.
 
-    The mapping lives at ``model.message_aliases``.  Mapping order is the
+    The mapping lives at ``model.message_aliases`` as ``{alias: {model: ..., provider: ...}}``
+    (``provider`` optional: without it only the model changes on the current route).  Mapping order is the
     precedence order when a message deliberately includes more than one alias.
     Aliases are case-insensitive and use escaped ``\b`` boundaries, so an alias
     such as ``Sol`` matches ``"use Sol"`` but never the ``sol`` in ``"console"``.
@@ -42,8 +48,33 @@ def resolve_message_model_alias(
         if not alias or not isinstance(model, str) or not model.strip():
             continue
         if re.search(rf"\b{re.escape(alias)}\b", user_message, flags=re.IGNORECASE):
-            return MessageModelAlias(alias=alias, model=model.strip())
+            provider = entry.get("provider")
+            provider = provider.strip() if isinstance(provider, str) and provider.strip() else None
+            return MessageModelAlias(alias=alias, model=model.strip(), provider=provider)
     return None
+
+
+def apply_message_model_alias(
+    user_message: Optional[str], model: str, runtime_kwargs: dict, config: Optional[dict],
+) -> tuple[str, dict]:
+    """Model and route for this turn only, never the session or persisted config.
+
+    An alias naming a ``provider`` gets that provider's whole route (as ``channel_overrides`` do);
+    an unavailable provider keeps this turn on the current route.
+    """
+    match = resolve_message_model_alias(user_message, config)
+    if match is None:
+        return model, runtime_kwargs
+    if not match.provider:
+        return match.model, runtime_kwargs
+    from gateway.run import _resolve_runtime_agent_kwargs_for_provider
+    try:
+        routed = _resolve_runtime_agent_kwargs_for_provider(match.provider, target_model=match.model)
+    except Exception as exc:
+        logger.warning("Model alias %s provider %s unavailable: %s", match.alias, match.provider, exc)
+        return model, runtime_kwargs
+    routed.pop("model", None)
+    return match.model, routed
 
 
 # What the user typed, keyed by conversation + inbound message id (platform ids repeat across chats),

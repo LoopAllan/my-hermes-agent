@@ -306,12 +306,6 @@ class GatewayTurnMixin:
 
         return model, runtime_kwargs
 
-    def _apply_message_model_alias(self, user_message: str, model: str, user_config=None) -> str:
-        """Resolve an inline alias for this turn, never the session or persisted config."""
-        from gateway.message_model_aliases import resolve_message_model_alias
-        match = resolve_message_model_alias(user_message, user_config)
-        return match.model if match is not None else model
-
     def _resolve_turn_agent_config(self, user_message: str, model: str, runtime_kwargs: dict) -> dict:
         """Effective model/runtime config for one turn. With `/fast` priority on, fast-mode
         ``request_overrides`` are deep-merged OVER the per-provider ones so both reach the model."""
@@ -2441,7 +2435,8 @@ class GatewayTurnMixin:
         try:
             user_config = _load_gateway_config()
             model, runtime_kwargs = self._resolve_session_agent_runtime(source=source, user_config=user_config)
-            model = self._apply_message_model_alias(prompt, model, user_config)
+            from gateway.message_model_aliases import apply_message_model_alias
+            model, runtime_kwargs = apply_message_model_alias(prompt, model, runtime_kwargs, user_config)
             if not runtime_kwargs.get("api_key"):
                 await adapter.send(
                     source.chat_id,
