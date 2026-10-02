@@ -218,7 +218,6 @@ def clean_subject(subject: str) -> str:
     return cleaned
 
 
-
 def get_commits(since_tag=None, until="HEAD", cwd=None):
     """Get commits in ``since_tag..until`` (or all of ``until`` if since_tag is None)."""
     if since_tag:
@@ -256,7 +255,6 @@ def get_commits(since_tag=None, until="HEAD", cwd=None):
         if len(parts) != 4:
             continue
         sha, name, email, subject = parts
-
         commits.append({
             "sha": sha,
             "short_sha": sha[:8],
@@ -264,7 +262,6 @@ def get_commits(since_tag=None, until="HEAD", cwd=None):
             "author_email": email,
             "subject": subject,
             "category": categorize_commit(subject),
-
         })
 
     return commits
@@ -306,14 +303,12 @@ def generate_changelog(commits, tag_name, semver, repo_url="https://github.com/N
         lines.append("> for Hermes Agent. See below for everything included in this initial release.")
         lines.append("")
 
-
     if not no_changelog:
         # Group commits by category
         categories = defaultdict(list)
 
         for commit in commits:
             categories[commit["category"]].append(commit)
-
 
         # Category display order and emoji
         category_order = [
@@ -339,7 +334,6 @@ def generate_changelog(commits, tag_name, semver, repo_url="https://github.com/N
                 subject = clean_subject(commit["subject"])
                 pr_num = get_pr_number(commit["subject"])
 
-
                 # Build the line
                 parts = [f"- {subject}"]
                 if pr_num:
@@ -347,11 +341,9 @@ def generate_changelog(commits, tag_name, semver, repo_url="https://github.com/N
                 else:
                     parts.append(f"([`{commit['short_sha']}`]({repo_url}/commit/{commit['sha']}))")
 
-
                 lines.append(" ".join(parts))
 
             lines.append("")
-
 
     # Full changelog link
     if prev_tag:
