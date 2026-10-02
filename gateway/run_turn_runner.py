@@ -1913,7 +1913,7 @@ class TurnRunner:
             )
             from gateway.message_model_aliases import user_authored_text
             resolved_model = runner._apply_message_model_alias(
-                user_authored_text(ctx.inbound_message_id, ctx.message), model, ctx.user_config)
+                user_authored_text(ctx.source, ctx.inbound_message_id, ctx.message), model, ctx.user_config)
             self._message_model_alias_applied = resolved_model != model
             model = resolved_model
             # Stashed by _resolve_session_agent_runtime when the primary's credentials failed and a

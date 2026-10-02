@@ -80,3 +80,19 @@ def test_gateway_alias_application_is_turn_scoped():
         "Inspect the error logs.", "openai/gpt-5.6-terra", config
     ) == "openai/gpt-5.6-terra"
     assert runner._session_model_overrides == {}
+
+
+def test_user_authored_text_is_scoped_to_its_conversation():
+    """Platform message ids repeat across chats (Telegram); one chat's text must never pick another's model."""
+    from gateway.config import Platform
+    from gateway.message_model_aliases import remember_user_authored_text, user_authored_text
+    from gateway.platforms.event import MessageEvent
+    from gateway.session import SessionSource
+
+    first = SessionSource(platform=Platform.TELEGRAM, chat_id="chat-a", chat_type="group")
+    second = SessionSource(platform=Platform.TELEGRAM, chat_id="chat-b", chat_type="group")
+    remember_user_authored_text(MessageEvent(text="plain question", source=first, message_id="42"))
+    remember_user_authored_text(MessageEvent(text="Sol, take this one", source=second, message_id="42"))
+
+    assert user_authored_text(first, "42", "expanded") == "plain question"
+    assert user_authored_text(second, "42", "expanded") == "Sol, take this one"
