@@ -429,6 +429,8 @@ RUN mkdir -p /etc/cont-init.d && \
         > /etc/cont-init.d/01-hermes-setup && \
     chmod +x /etc/cont-init.d/01-hermes-setup
 COPY --chmod=0755 docker/marketplace-bootstrap.sh /opt/hermes/docker/marketplace-bootstrap.sh
+# Wrapped runtimes (entrypoint not PID 1) skip cont-init.d; entrypoint-dispatch runs this dir instead.
+COPY --chmod=0755 docker/marketplace-bootstrap.sh /opt/hermes/docker/direct-bootstrap.d/017-marketplace-bootstrap
 COPY --chmod=0755 docker/cont-init.d/015-supervise-perms /etc/cont-init.d/015-supervise-perms
 COPY --chmod=0755 docker/cont-init.d/017-marketplace-bootstrap /etc/cont-init.d/017-marketplace-bootstrap
 COPY --chmod=0755 docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-reconcile-profiles

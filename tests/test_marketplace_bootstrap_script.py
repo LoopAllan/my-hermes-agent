@@ -17,6 +17,10 @@ SCRIPT = REPO_ROOT / "docker" / "marketplace-bootstrap.sh"
 HOOK = REPO_ROOT / "docker" / "cont-init.d" / "017-marketplace-bootstrap"
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 
+# Stand-ins for the uid probe and s6 privilege drop, so results never depend on who runs the suite.
+_FAKE_ID = "#!/bin/sh\nprintf '%s\\n' \"${FAKE_UID:-10000}\"\n"
+_FAKE_SETUIDGID = "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$DROP_LOG\"\nshift\nFAKE_UID=10000 exec \"$@\"\n"
+
 
 def _run_script(
     tmp_path: Path,
@@ -28,6 +32,7 @@ def _run_script(
     mount_mode: str = "directory",
     marketplace_overrides: dict[str, object] | None = None,
     extra_env: dict[str, str] | None = None,
+    fake_bins: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the real script against real temporary directories and a fake git binary."""
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -98,6 +103,10 @@ def _run_script(
     }
     if extra_env:
         env.update(extra_env)
+    env.setdefault("FAKE_UID", "10000")  # results must not depend on the uid running the suite
+    for name, body in ({"id": _FAKE_ID} | (fake_bins or {})).items():
+        (bin_dir / name).write_text(body, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
     return subprocess.run(["sh", str(SCRIPT)], text=True, capture_output=True, env=env, timeout=15)
 
 
@@ -204,9 +213,28 @@ def test_image_wires_hermes_hook_in_required_cont_init_order() -> None:
 
     assert "COPY --chmod=0755 docker/marketplace-bootstrap.sh /opt/hermes/docker/marketplace-bootstrap.sh" in dockerfile
     assert "COPY --chmod=0755 docker/cont-init.d/017-marketplace-bootstrap /etc/cont-init.d/017-marketplace-bootstrap" in dockerfile
-    assert "s6-setuidgid hermes /opt/hermes/docker/marketplace-bootstrap.sh" in hook
+    assert "exec /opt/hermes/docker/marketplace-bootstrap.sh" in hook
+    assert "COPY --chmod=0755 docker/marketplace-bootstrap.sh /opt/hermes/docker/direct-bootstrap.d/017-marketplace-bootstrap" in dockerfile
     assert 'if [ -x /opt/hermes/.venv/bin/python ]; then' in bootstrap
     assert 'exec /opt/hermes/.venv/bin/python -m gateway.marketplace_bootstrap "$@"' in bootstrap
     assert 'exec python3 -m gateway.marketplace_bootstrap "$@"' in bootstrap
     assert "<<" not in bootstrap
     assert dockerfile.index("COPY --chmod=0755 docker/cont-init.d/015-supervise-perms") < dockerfile.index("COPY --chmod=0755 docker/cont-init.d/017-marketplace-bootstrap") < dockerfile.index("COPY --chmod=0755 docker/cont-init.d/02-reconcile-profiles")
+
+
+@pytest.mark.parametrize(("start_uid", "expected_drops"), [("0", ["hermes"]), ("10000", [])])
+def test_bootstrap_drops_to_hermes_only_when_started_as_root(
+    tmp_path: Path, start_uid: str, expected_drops: list[str]
+) -> None:
+    """Both startup paths (s6 cont-init and direct-bootstrap.d) run the script itself, so it owns the drop."""
+    drop_log = tmp_path / "drops.log"
+    result = _run_script(
+        tmp_path / "run",
+        extra_env={"FAKE_UID": start_uid, "DROP_LOG": str(drop_log)},
+        fake_bins={"s6-setuidgid": _FAKE_SETUIDGID},
+    )
+
+    assert result.returncode == 0, result.stderr
+    drops = drop_log.read_text(encoding="utf-8").split() if drop_log.exists() else []
+    assert drops == expected_drops
+    assert (tmp_path / "run" / "hermes-home" / "SOUL.md").read_text(encoding="utf-8") == "Marketplace soul\n"

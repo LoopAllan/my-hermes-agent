@@ -135,6 +135,8 @@ def test_token_parser_accepts_bom_prefixed_vault_env_file(tmp_path: Path) -> Non
     assert read_marketplace_token(vault) == "bom-safe"
 
 
+# The bootstrap anchors clone paths at /proc/self/fd, which only Linux (the container) provides.
+@pytest.mark.platforms("linux")
 def test_bootstrap_parent_symlink_swap_cannot_redirect_clone_or_deletion(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
