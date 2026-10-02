@@ -114,3 +114,19 @@ def test_aliases_reach_the_resolver_through_the_gateway_config_loader():
 
     assert resolved is not None
     assert (resolved.model, resolved.provider) == ("moonshot/kimi-k3", "openrouter")
+
+
+def test_user_authored_text_is_scoped_to_its_routed_profile():
+    """Two profiles' bots in one chat can see the same message id; each keeps its own text."""
+    from gateway.config import Platform
+    from gateway.message_model_aliases import remember_user_authored_text, user_authored_text
+    from gateway.platforms.event import MessageEvent
+    from gateway.session import SessionSource
+
+    work = SessionSource(platform=Platform.TELEGRAM, chat_id="group-1", chat_type="group", profile="work")
+    home = SessionSource(platform=Platform.TELEGRAM, chat_id="group-1", chat_type="group", profile="home")
+    remember_user_authored_text(MessageEvent(text="plain question", source=work, message_id="7"))
+    remember_user_authored_text(MessageEvent(text="Sol, take this one", source=home, message_id="7"))
+
+    assert user_authored_text(work, "7", "expanded") == "plain question"
+    assert user_authored_text(home, "7", "expanded") == "Sol, take this one"

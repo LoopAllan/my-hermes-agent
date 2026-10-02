@@ -109,7 +109,8 @@ def resolve_turn_model_route(
     return resolved_model, resolved_runtime, (resolved_model, resolved_runtime) != (model, runtime_kwargs)
 
 
-# What the user typed, keyed by conversation + inbound message id (platform ids repeat across chats),
+# What the user typed, keyed by routed profile + conversation + inbound message id (ids repeat across
+# chats, and two profiles' bots can see the same chat),
 # captured before skill scaffolds or media enrichment rewrite ``event.text``. A small LRU, so
 # re-resolving within one turn sees the same text.
 _USER_AUTHORED_TEXT: "OrderedDict[tuple, str]" = OrderedDict()
@@ -120,8 +121,8 @@ _USER_AUTHORED_TEXT_LOCK = threading.Lock()
 def _text_key(source: Any, message_id: Any) -> tuple:
     platform = getattr(source, "platform", None)
     return (
-        getattr(platform, "value", platform), getattr(source, "chat_id", None),
-        getattr(source, "thread_id", None), str(message_id),
+        getattr(source, "profile", None), getattr(platform, "value", platform),
+        getattr(source, "chat_id", None), getattr(source, "thread_id", None), str(message_id),
     )
 
 
