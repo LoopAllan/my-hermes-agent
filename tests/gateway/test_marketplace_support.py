@@ -414,3 +414,24 @@ def test_failed_swap_restores_the_retired_checkout(monkeypatch: pytest.MonkeyPat
 
     assert (repository / "plugins" / "skills" / "SKILL.md").read_text(encoding="utf-8") == "serving"
     assert [p.name for p in repository.parent.iterdir()] == ["repository"]
+
+
+def test_repo_dir_placeholders_resolve_in_the_active_profile_scope(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A secondary profile's ${VAR} never picks up the launch process's value of that variable."""
+    from agent import secret_scope
+
+    monkeypatch.setenv("MARKETPLACE_ROOT", str(tmp_path / "launch-checkout"))
+    secret_scope.set_multiplex_active(True)
+    token = secret_scope.set_secret_scope({}, profile_home=str(tmp_path / "work"))
+    try:
+        config = load_marketplace_config(
+            _settings(Path("${MARKETPLACE_ROOT}/repository")), hermes_home=tmp_path / "work"
+        )
+    finally:
+        secret_scope.reset_secret_scope(token)
+        secret_scope.set_multiplex_active(False)
+
+    assert config is not None
+    assert "launch-checkout" not in str(config.repo_dir)

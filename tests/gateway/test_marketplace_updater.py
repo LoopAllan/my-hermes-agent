@@ -164,22 +164,21 @@ async def test_gateway_watcher_bootstraps_a_missing_checkout_in_the_profile_scop
         bootstrapped.append((self.hermes_home, self.config.repo_dir, get_hermes_home()))
         self.config.skills_dir.mkdir(parents=True)
 
-    async def record_reload():
-        reloads.append(str(get_hermes_home()))
-        return {}
+    async def record_reload(_runner, home):
+        reloads.append((str(home), str(get_hermes_home())))
 
     async def stop_after_first_round(_interval):
         runner._running = False
 
     monkeypatch.setattr(marketplace_bootstrap.MarketplaceBootstrap, "run", fake_run)
     monkeypatch.setattr(marketplace_updater, "update_marketplace_worktree", lambda _config: False)
-    monkeypatch.setattr(runner, "_reload_skills_runtime", record_reload)
+    monkeypatch.setattr(marketplace_watcher, "_reload_profile_skills", record_reload)
     monkeypatch.setattr(marketplace_watcher.asyncio, "sleep", stop_after_first_round)
 
     await runner._marketplace_skills_watcher()
 
     assert bootstrapped == [(served_home, served_home / "marketplace", served_home)]
-    assert reloads == [str(served_home)]
+    assert reloads == [(str(served_home), str(served_home))]
 
 
 @pytest.mark.asyncio
@@ -219,6 +218,45 @@ async def test_gateway_watcher_reloads_skills_when_the_marketplace_is_disabled(m
     await runner._marketplace_skills_watcher()
 
     assert reloads == [1]  # nothing on the enabled round, one reload once it was disabled
+
+
+@pytest.mark.asyncio
+async def test_secondary_profile_reload_leaves_the_shared_primary_adapter_alone(monkeypatch, tmp_path: Path):
+    """A shared-bot satellite's marketplace reload must not swap the primary adapter's skill catalog."""
+    from unittest.mock import MagicMock
+
+    from gateway import marketplace_watcher
+    from gateway import run as gateway_run
+    from gateway.config import GatewayConfig, Platform
+
+    served_home = tmp_path / "profiles" / "work"
+    (tmp_path / "work-marketplace" / "plugins" / "skills").mkdir(parents=True)
+    served_home.mkdir(parents=True)
+    (served_home / "config.yaml").write_text(
+        yaml.safe_dump(_config(tmp_path / "work-marketplace")), encoding="utf-8"
+    )
+    shared, own = MagicMock(), MagicMock()
+    runner = gateway_run.GatewayRunner.__new__(gateway_run.GatewayRunner)
+    runner.config = GatewayConfig()
+    runner._running = True
+    runner._served_profile_homes = {"work": served_home}
+    runner.adapters = {Platform.DISCORD: shared}
+    runner._adapters_for_profile = lambda profile: (
+        {Platform.DISCORD: shared, Platform.TELEGRAM: own} if profile == "work" else {Platform.DISCORD: shared}
+    )
+
+    async def stop_after_first_round(_interval):
+        runner._running = False
+
+    monkeypatch.setattr(marketplace_updater, "update_marketplace_worktree", lambda _config: True)
+    monkeypatch.setattr("agent.skill_commands.reload_skills", lambda: {"added": [], "removed": []})
+    monkeypatch.setattr(marketplace_watcher, "_profile_homes", lambda _runner: [served_home])
+    monkeypatch.setattr(marketplace_watcher.asyncio, "sleep", stop_after_first_round)
+
+    await runner._marketplace_skills_watcher()
+
+    shared.refresh_skill_group.assert_not_called()
+    own.refresh_skill_group.assert_called_once()
 
 
 def test_update_refuses_checkout_outside_external_skill_roots(monkeypatch, tmp_path: Path):

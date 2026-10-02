@@ -101,7 +101,11 @@ def load_marketplace_config(
             "skills.marketplace.skills_path must stay within the repository"
         )
 
-    repo_dir = Path(os.path.expandvars(os.path.expanduser(repo_dir_value)))
+    # The config loader's expander honors the active profile scope (a miss under multiplex stays
+    # verbatim) — os.path.expandvars would substitute the launch process's environment.
+    from hermes_cli.config import _expand_env_vars
+
+    repo_dir = Path(os.path.expanduser(_expand_env_vars(repo_dir_value)))
     if not repo_dir.is_absolute():
         if hermes_home is None:
             from hermes_constants import get_hermes_home
