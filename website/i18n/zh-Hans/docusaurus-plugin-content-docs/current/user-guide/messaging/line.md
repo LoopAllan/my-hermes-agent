@@ -81,6 +81,8 @@ gateway:
         - C1234567890abcdef...
       allowed_rooms:
         - R1234567890abcdef...
+      # 将列出的群组／房间视为共享聊天授权；未设置时，发送者仍须在 allowed_users 中。
+      authorize_allowed_chats: true
       # 仅作用于群组和房间；白名单私聊用户不受影响。
       require_mention: true
 ```
@@ -94,6 +96,8 @@ LINE_ALLOWED_ROOMS=R1234567890abcdef...
 ```
 
 `require_mention` 使用 LINE 的结构化提及元数据，不会以显示名称进行文字匹配。启用后，已授权群组或房间中的消息必须明确 @提及机器人，才会被处理。
+
+仅当列出的群组或房间本身就是共享工作区时，才设置 `authorize_allowed_chats: true`：它会独立于 `LINE_ALLOWED_USERS` / `allowed_users` 授权该聊天。默认值为 `false`，因此现有安装在已列出的聊天中仍要求发送者在白名单内。
 
 这就够了 — `gateway/config.py` 中的捆绑插件扫描会自动识别 `plugins/platforms/line/`。无需编辑 `Platform.LINE` 枚举，无需注册 `_create_adapter`。
 
@@ -179,8 +183,8 @@ LINE_HOME_CHANNEL=Uxxxxxxxxxxxxxxxxxxxx     # 默认推送目标
 | `LINE_PORT` | 否 | `8646` | Webhook 绑定端口 |
 | `LINE_PUBLIC_URL` | 媒体发送时必填 | — | 公网 HTTPS 基础 URL；发送图片/音频/视频时必须设置 |
 | `LINE_ALLOWED_USERS` | 私聊时必填 | — | 逗号分隔的用户 ID（U 开头） |
-| `LINE_ALLOWED_GROUPS` | 群聊时必填 | — | 逗号分隔的群组 ID（C 开头） |
-| `LINE_ALLOWED_ROOMS` | 房间时必填 | — | 逗号分隔的房间 ID（R 开头） |
+| `LINE_ALLOWED_GROUPS` | 群聊时必填 | — | 逗号分隔的群组 ID（C 开头）；作为共享聊天授权需设置 `authorize_allowed_chats: true` |
+| `LINE_ALLOWED_ROOMS` | 房间时必填 | — | 逗号分隔的房间 ID（R 开头）；作为共享聊天授权需设置 `authorize_allowed_chats: true` |
 | `LINE_ALLOW_ALL_USERS` | 仅开发环境 | `false` | 完全跳过白名单验证 |
 | `LINE_HOME_CHANNEL` | 否 | — | 默认 cron / 通知推送目标 |
 | `LINE_SLOW_RESPONSE_THRESHOLD` | 否 | `45` | 触发 postback 按钮的等待秒数（`0` = 禁用） |
@@ -196,7 +200,7 @@ LINE_HOME_CHANNEL=Uxxxxxxxxxxxxxxxxxxxx     # 默认推送目标
 
 **webhook 验证时提示"invalid signature"。** `Channel secret` 复制有误，或隧道重写了请求体。请先用 `curl -i https://<tunnel>/line/webhook/health` 验证 — 应返回 `{"status":"ok","platform":"line"}`。
 
-**机器人在群组或房间中收不到消息。** 检查会话 ID 是否在 `LINE_ALLOWED_GROUPS`（`C...`）或 `LINE_ALLOWED_ROOMS`（`R...`）中。若已在 `config.yaml` 中启用 `require_mention: true`，消息还必须明确 @提及机器人。要查找 ID，请发送测试消息后在 `~/.hermes/logs/gateway.log` 中搜索 `LINE: rejecting unauthorized source` — 被拒绝的 source 字典中包含相关 ID。
+**机器人在群组或房间中收不到消息。** 检查会话 ID 是否在 `LINE_ALLOWED_GROUPS`（`C...`）或 `LINE_ALLOWED_ROOMS`（`R...`）中。若发送者不在 `allowed_users` 中，还需在 `config.yaml` 设置 `authorize_allowed_chats: true`。若已启用 `require_mention: true`，消息还必须明确 @提及机器人。要查找 ID，请发送测试消息后在 `~/.hermes/logs/gateway.log` 中搜索 `LINE: rejecting unauthorized source` — 被拒绝的 source 字典中包含相关 ID。
 
 **`send_image` 报错"LINE_PUBLIC_URL must be set"。** LINE Messaging API 不接受二进制上传 — 图片、音频和视频必须是可访问的 HTTPS URL。将 `LINE_PUBLIC_URL` 设置为隧道的公网主机名，适配器会自动从 `/line/media/<token>/<filename>` 提供文件服务。
 
