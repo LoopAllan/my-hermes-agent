@@ -28,8 +28,9 @@ jobs:
     runs-on: windows-latest
     # This suite originally used six workers on windows-latest-32-core. Hosted
     # runners cannot sustain six concurrent full toolchain downloads, so two
-    # workers trade a longer wall clock for bounded network, disk and CPU use.
-    timeout-minutes: 75
+    # workers trade a longer wall clock for bounded network, disk and CPU use:
+    # six ~21-27 min journeys took 73 min of tests plus setup (run 36977189113).
+    timeout-minutes: 120
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
